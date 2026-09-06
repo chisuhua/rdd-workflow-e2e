@@ -20,7 +20,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install rdd-workflow
-        run: ./install_testbed.sh --clone
+        run: |
+          chmod +x install_testbed.sh
+          ./install_testbed.sh --clone
 
       - name: Verify install
         run: ./install_testbed.sh --status
@@ -33,10 +35,10 @@ jobs:
       - name: Install bats-core 1.10+
         run: |
           sudo apt-get install -y bats || {
-            # Fallback: clone bats-core from GitHub
             git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats
             sudo /tmp/bats/install.sh /usr/local
           }
+          chmod +x tests/scripts/*.sh
 
       - name: Run bats test suite
         id: bats
@@ -58,9 +60,7 @@ jobs:
 
       - name: Regression report
         if: always()
-        run: |
-          chmod +x tests/scripts/*.sh
-          bash tests/scripts/report_regression.sh --no-color
+        run: bash tests/scripts/report_regression.sh --no-color
 
       - name: Archive test results on failure
         if: failure()
