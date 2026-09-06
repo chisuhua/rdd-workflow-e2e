@@ -1,0 +1,14 @@
+# KNOWN_FAILURES.txt — baseline for rdd-workflow-e2e external test bed
+#
+# Format: <test_name> # <reason>
+#
+# Lines in this file represent pre-existing, intentionally-accepted failures.
+# These tests will not block CI; they're tracked here so that:
+#   1. New regressions are visible (failures NOT in this file are reported as "新增失败")
+#   2. When a known failure is fixed, this file should be updated
+#
+# Comparison logic: see bats output diff between current run and this baseline.
+#
+# Currently no known failures — all 41 cases (19 E2E + 6 rddf CLI + 6 install
+# + 5 external + 5 other) are expected to pass cleanly. If a regression
+# occurs, add its test name here with a clear reason.

@@ -1,0 +1,66 @@
+name: test
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nightly at 02:00 UTC — catches upstream rdd-workflow changes
+    - cron: "0 2 * * *"
+
+jobs:
+  test:
+    name: bats (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout rdd-workflow-e2e
+        uses: actions/checkout@v4
+
+      - name: Install rdd-workflow
+        run: ./install_testbed.sh --clone
+
+      - name: Verify install
+        run: ./install_testbed.sh --status
+
+      - name: Install OS dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y jq python3-jsonschema
+
+      - name: Install bats-core 1.10+
+        run: |
+          sudo apt-get install -y bats || {
+            # Fallback: clone bats-core from GitHub
+            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats
+            sudo /tmp/bats/install.sh /usr/local
+          }
+
+      - name: Run bats test suite
+        run: |
+          set -e
+          # RDD_WORKFLOW_REPO defaults to ~/.agents/skills/rdd-workflow
+          # Resolve symlink if present (--clone installs to a real dir, not symlink)
+          if [ -e "$HOME/.agents/skills/rdd-workflow" ]; then
+            RDD_WORKFLOW_REPO=$(readlink -f "$HOME/.agents/skills/rdd-workflow")
+            export RDD_WORKFLOW_REPO
+            echo "RDD_WORKFLOW_REPO=$RDD_WORKFLOW_REPO"
+          fi
+          if [ -z "$RDD_WORKFLOW_REPO" ]; then
+            echo "❌ RDD_WORKFLOW_REPO not set" >&2
+            exit 1
+          fi
+          echo "Running bats tests against $RDD_WORKFLOW_REPO"
+          bats tests/integration/ tests/_lib/
+
+      - name: Archive test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bats-failure-logs
+          path: |
+            /tmp/*.log
+            tests/**/*.log
+          if-no-files-found: ignore
