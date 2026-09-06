@@ -39,6 +39,7 @@ jobs:
           }
 
       - name: Run bats test suite
+        id: bats
         run: |
           set -e
           # RDD_WORKFLOW_REPO defaults to ~/.agents/skills/rdd-workflow
@@ -54,6 +55,12 @@ jobs:
           fi
           echo "Running bats tests against $RDD_WORKFLOW_REPO"
           bats tests/integration/ tests/_lib/
+
+      - name: Regression report
+        if: always()
+        run: |
+          chmod +x tests/scripts/*.sh
+          bash tests/scripts/report_regression.sh --no-color
 
       - name: Archive test results on failure
         if: failure()
