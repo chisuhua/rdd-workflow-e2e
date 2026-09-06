@@ -1,0 +1,3 @@
+# Bats ephemeral test data
+.bats-tmp/
+$BATS_TEST_TMPDIR/
