@@ -40,9 +40,9 @@ jobs:
 
       - name: Install openspec CLI (required for archive + change ops)
         run: |
-          # Install openspec CLI per https://github.com/insight-hub/openspec
-          curl -fsSL https://get.openspec.dev | bash
-          # Verify on PATH
+          # Install Node.js deps (npm/pnpm) + openspec via npm
+          sudo apt-get install -y nodejs npm
+          sudo npm install -g @insight-hub/openspec
           command -v openspec && openspec --version
 
       - name: Make scripts executable
