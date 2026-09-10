@@ -16,7 +16,7 @@ load_lib test_full_workflow_fixture
 ALL_SUBCOMMANDS="version guide status deps feature roadmap dashboard \
 doctor validate monitor sessions orchestrate \
 archive cleanup init migrate-improvements feedback issue \
-ac-verify arch archive-sync builder contract-check discover-ship-changes \
+arch archive-sync builder contract-check discover-ship-changes \
 iteration l2-trend planner rdd-hub-bootstrap rdd-verify report-issue \
 scheduler sync-hub watch-hub hub"
 
@@ -102,7 +102,7 @@ feedback issue iteration l2-trend planner scheduler regression-diff"
 }
 
 @test "rddf archive/cleanup/build --help: returns usage info without running" {
-    for cmd in archive cleanup builder ac-verify rdd-hub-bootstrap report-issue \
+    for cmd in archive cleanup builder rdd-hub-bootstrap report-issue \
                sync-hub watch-hub contract-check arch discover-ship-changes \
                archive-sync rdd-verify; do
         # These mutate state — only check --help or quick query
