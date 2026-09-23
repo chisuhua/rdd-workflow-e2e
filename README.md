@@ -54,9 +54,10 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 | `tests/integration/test_install_global.bats` | 6 | `install.sh --global` works: 27 symlinks, `rddf` in PATH, `_lib` Python importable |
 | `tests/integration/test_external_project_smoke.bats` | 5 | Every SKILL.md has valid YAML frontmatter + name/description/license + semver version |
 | `tests/integration/test_stage_guide_cross_process_e2e.bats` | 6 | Cross-process (real subprocess.Popen + fcntl contention) for feat-guide-orchestrator-session-event-bus: fcntl concurrent writes, last_seen_offset polling, crash recovery, H7 singleton, archive-triggered reset, guide_entry persistence |
+| `tests/integration/test_guide_polling_loop_e2e.bats` | 3 | Closed polling loop for add-guide-polling-loop-implementation (v4.1): AC-G1 guide reads window-B events, AC-G2 last_seen_offset monotonic advance, AC-G3 archive-triggered offset reset + re-read |
 | `tests/_lib/test_full_workflow_fixture_*.bats` | 12 | Per-function unit tests of the E2E fixture helpers |
 
-Total: **42 cases, ~20s runtime** (was 36, +6 from feat/stage-guide-cross-process-coverage).
+Total: **45 cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implementation).
 
 ## Architecture
 
