@@ -47,15 +47,16 @@ This repo's `.github/workflows/test.yml` runs on:
 
 Each CI run executes `./install_testbed.sh --clone` (fresh install from latest rdd-workflow master) then `bats tests/`.
 
-## Test suite breakdown (36 cases, ~20s)| File | Cases | What it validates |
+## Test suite breakdown (42 cases, ~20s)| File | Cases | What it validates |
 |------|------:|-------------------|
 | `tests/integration/test_full_workflow_e2e.bats` | 7 | Full arch→planner→builder→archive workflow with real handoff contracts (ADR-0016 v3 schema, planner-handoff-v1, builder-handoff-v1, iteration schema) |
 | `tests/integration/test_rddf_cli_all_subcommands.bats` | 6 | All 36 `rddf` subcommands exposed via `--help`; basic commands work |
 | `tests/integration/test_install_global.bats` | 6 | `install.sh --global` works: 27 symlinks, `rddf` in PATH, `_lib` Python importable |
 | `tests/integration/test_external_project_smoke.bats` | 5 | Every SKILL.md has valid YAML frontmatter + name/description/license + semver version |
+| `tests/integration/test_stage_guide_cross_process_e2e.bats` | 6 | Cross-process (real subprocess.Popen + fcntl contention) for feat-guide-orchestrator-session-event-bus: fcntl concurrent writes, last_seen_offset polling, crash recovery, H7 singleton, archive-triggered reset, guide_entry persistence |
 | `tests/_lib/test_full_workflow_fixture_*.bats` | 12 | Per-function unit tests of the E2E fixture helpers |
 
-Total: **36 cases, ~20s runtime**.
+Total: **42 cases, ~20s runtime** (was 36, +6 from feat/stage-guide-cross-process-coverage).
 
 ## Architecture
 
