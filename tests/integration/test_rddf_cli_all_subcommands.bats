@@ -10,6 +10,18 @@
 load ../test_helper
 load_lib test_full_workflow_fixture
 
+# Run all rddf invocations inside the project-under-test directory so that
+# handlers reading `<project_root>/package.json` (version) and
+# `<project_root>/skills/<sub>/scripts/<script>.py` (sync-hub etc.) via
+# `os.environ.get("RDDF_PROJECT_ROOT") or os.getcwd()` resolve to the
+# installed rdd-workflow, not the e2e repo cwd. Pre-fix (2026-09-24):
+# test 2 (version) and test 6 (sync-hub/watch-hub/etc. --help) failed
+# with "package.json not found at <e2e>/package.json" because rddf wrapper
+# does not propagate RDD_WORKFLOW_REPO → RDDF_PROJECT_ROOT.
+setup() {
+    cd "$RDD_WORKFLOW_REPO"
+}
+
 # All rddf subcommands that must be exposed (per _lib/cli/*.py)
 # Note: `help` is not a separate subcommand (it's --help flag);
 #       `regression_diff_cmd` is exposed as `hub retry-failed` sub-subcommand.
