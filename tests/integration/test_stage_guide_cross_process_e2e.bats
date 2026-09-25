@@ -253,13 +253,8 @@ for i in range(30):
     ) &
     local sub_pid=$!
 
-    sleep 3  # let guide_entry create stage_guide session
-
-    # Verify session was created (active)
-    local active_count
-    active_count=$(count_active_stage_guide_sessions "$sessions_file")
-    [[ "$active_count" -eq 1 ]] || {
-        echo "expected 1 active stage_guide during subshell, got $active_count"
+    wait_until_active_stage_guide_sessions "$sessions_file" 1 5 || {
+        echo "expected 1 active stage_guide during subshell, timeout after 5s"
         kill -9 $sub_pid 2>/dev/null
         return 1
     }
@@ -268,15 +263,8 @@ for i in range(30):
     kill -TERM $sub_pid 2>/dev/null || true
     wait $sub_pid 2>/dev/null || true
 
-    # Session should now be completed (or marked terminal)
-    local completed_count
-    completed_count=$(python3 -c "
-import json
-d = json.load(open('$sessions_file'))
-print(sum(1 for s in d.get('sessions', []) if s.get('kind')=='stage_guide' and s.get('state') in ('completed','failed','abandoned')))
-")
-    [[ "$completed_count" -ge 1 ]] || {
-        echo "expected guide_close to mark session completed, got $completed_count terminal sessions"
+    wait_until_terminal_stage_guide_sessions "$sessions_file" 1 5 || {
+        echo "expected guide_close to mark session terminal, timeout after 5s"
         return 1
     }
 }
@@ -296,7 +284,11 @@ print(sum(1 for s in d.get('sessions', []) if s.get('kind')=='stage_guide' and s
     ) &
     local sub_pid=$!
 
-    sleep 3  # let guide_entry create stage_guide session
+    wait_until_active_stage_guide_sessions "$sessions_file" 1 5 || {
+        echo "expected 1 active stage_guide during subshell, timeout after 5s"
+        kill -9 $sub_pid 2>/dev/null
+        return 1
+    }
 
     # SIGKILL (no trap can intercept)
     kill -9 $sub_pid 2>/dev/null || true

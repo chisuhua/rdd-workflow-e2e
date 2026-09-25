@@ -151,6 +151,44 @@ print(sum(1 for s in d.get('sessions', []) if s.get('kind')=='stage_guide' and s
 "
 }
 
+# Wait until the count of active stage_guide sessions reaches $2 (or timeout $3s).
+wait_until_active_stage_guide_sessions() {
+    local sessions_file="$1"
+    local expected="$2"
+    local max_wait="${3:-5}"
+    local elapsed=0
+    local count=0
+    while [ "$(awk "BEGIN{print ($elapsed < $max_wait)}")" = "1" ]; do
+        count=$(count_active_stage_guide_sessions "$sessions_file")
+        [[ "$count" -eq "$expected" ]] && return 0
+        sleep 0.1
+        elapsed=$(awk "BEGIN{print ($elapsed + 0.1)}")
+    done
+    echo "wait_until_active_stage_guide_sessions: expected $expected, got $count after ${max_wait}s"
+    return 1
+}
+
+# Wait until count of terminal stage_guide sessions reaches $2.
+wait_until_terminal_stage_guide_sessions() {
+    local sessions_file="$1"
+    local expected="$2"
+    local max_wait="${3:-5}"
+    local elapsed=0
+    local count=0
+    while [ "$(awk "BEGIN{print ($elapsed < $max_wait)}")" = "1" ]; do
+        count=$(python3 -c "
+import json
+d = json.load(open('$sessions_file'))
+print(sum(1 for s in d.get('sessions', []) if s.get('kind')=='stage_guide' and s.get('state') in ('completed','failed','abandoned')))
+")
+        [[ "$count" -eq "$expected" ]] && return 0
+        sleep 0.1
+        elapsed=$(awk "BEGIN{print ($elapsed + 0.1)}")
+    done
+    echo "wait_until_terminal_stage_guide_sessions: expected $expected, got $count after ${max_wait}s"
+    return 1
+}
+
 # Assert that a stage_guide session owned by $1 has goal.last_seen_offset == $2.
 assert_last_seen_offset() {
     local sessions_file="$1"
