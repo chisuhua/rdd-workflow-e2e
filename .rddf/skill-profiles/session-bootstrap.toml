@@ -1,0 +1,13 @@
+[profile]
+name = "rdd-workflow-e2e"
+title = "rdd-workflow e2e testbed Session Bootstrap"
+
+[sections]
+order = [
+  "header",
+  "active_changes",
+  "recent_commits",
+  "workspace_health",
+]
+test_families = []
+custom_sections = []
