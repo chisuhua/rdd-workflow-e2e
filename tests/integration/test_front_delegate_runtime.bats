@@ -1266,7 +1266,10 @@ PY
 # ═══════════════════════════════════════════════════════════════════════════
 @test "L2-14: front 的 subagent 门控 —— 只 allow 五个只读 agent" {
     # 纯配置判据（不烧模型额度）：front 的 subagent 规则必须恰好是
-    #   五个只读 agent allow + 末尾 "*": deny，且不得出现 general/plan/build。
+    #   **首条** "*": deny + 五个只读 agent allow，且不得出现 general/plan/build。
+    #   ⚠ 顺序是硬约束（ADR D2.1）：opencode 的工具可见性判定取该 action **最后一条**
+    #     匹配规则 —— "*": deny 放末尾会把整个 subagent 工具隐藏（逐 agent allow 失效）。
+    #     因此本用例必须断言**顺序**，否则顺序回归会静默通过。
     local agents
     agents="$(l2_debug_agents)" || { echo "opencode debug agents 无有效输出" >&2; return 1; }
 
@@ -1278,9 +1281,15 @@ front = next((a for a in data if a.get("name") == "front"), None)
 assert front is not None, "没有 front agent"
 rules = [p for p in (front.get("permissions") or []) if p.get("action") == "subagent"]
 allow = sorted(p.get("resource") for p in rules if p.get("effect") == "allow")
-deny_wild = any(p.get("resource") == "*" and p.get("effect") == "deny" for p in rules)
+deny_wild = [p for p in rules if p.get("resource") == "*" and p.get("effect") == "deny"]
 assert allow == ["critic", "explore", "librarian", "metis", "oracle"], "allow 集合不符: %r" % allow
-assert deny_wild, "缺少 *: deny 兜底"
+assert len(deny_wild) == 1, "缺少唯一的 *: deny 兜底: %r" % rules
+# 顺序约束（ADR D2.1）："*": deny 必须是**第一条**，最后一条必须是具体 agent allow。
+# 顺序错 → opencode 把整个 subagent 工具隐藏 → 逐 agent allow 形同虚设。
+assert rules[0].get("resource") == "*" and rules[0].get("effect") == "deny", \
+    "首条不是 *: deny（顺序违反 ADR D2.1，subagent 工具会被整体隐藏）: %r" % rules
+assert rules[-1].get("resource") != "*", \
+    "最后一条是 *（顺序违反 ADR D2.1，subagent 工具会被整体隐藏）: %r" % rules
 for bad in ("general", "plan", "build"):
     assert bad not in allow, "危险 agent 被放行: " + bad
 print("ok")
