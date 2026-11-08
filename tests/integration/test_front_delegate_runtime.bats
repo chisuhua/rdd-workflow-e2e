@@ -317,10 +317,14 @@ for line in raw.splitlines():
         out = json.dumps(out, ensure_ascii=False)
     out = str(out or "")
     m = re.search(r'sessionID="?([A-Za-z0-9_]+)"?', out)
+    err = st.get("error")
+    if isinstance(err, dict):
+        err = err.get("message") or json.dumps(err, ensure_ascii=False)
     print(json.dumps({
         "agent": inp.get("agent"),
         "session_id": m.group(1) if m else None,
         "status": st.get("status"),
+        "error": err or "",
         "output_prefix": out[:300],
     }, ensure_ascii=False))
 PYEOF
@@ -523,6 +527,16 @@ PROMPT_EOF
 - acceptance: "用 2 句话说明 ${fixture} 下的 README 讲了什么，并给出文件路径"
 注意：这是知识会话，不要修改任何文件；project_dir 必须就是 ${fixture} 这个绝对路径。
 如果 delegate 返回 busy 或被拒绝，直接汇报结果即可，不要重复尝试、不要换参数再试。
+PROMPT_EOF
+        ;;
+    subagent-denied)
+        cat <<PROMPT_EOF
+只做这一件事：调用一次 subagent 工具，并且**故意**指定一个不在白名单里的 agent：
+- agent: general
+- description: 故意触发权限拒绝
+- prompt: 说一句话即可
+注意：这条调用是故意要失败的（general 不在 front 的 subagent 白名单里），请只调用一次，
+把错误信息原样返回，不要重试、不要换 agent。
 PROMPT_EOF
         ;;
     subagent-guard)
@@ -1271,4 +1285,50 @@ for bad in ("general", "plan", "build"):
     assert bad not in allow, "危险 agent 被放行: " + bad
 print("ok")
 '
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-15：逐 agent 门控 —— front 召 general 必须被**权限层**拒绝
+#   （v2.5 修正的配套：subagent 规则顺序改为 "*": deny 第一条后，工具可见，
+#    必须同时证明"可见"没有带来"可调任意 agent"的旁路）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-15: 逐 agent 门控 —— front 召 general 被权限层拒绝" {
+    l2_run_scenario subagent-denied
+
+    local calls rec
+    calls="$(l2_subagent_calls "$L2_ROOT/run-subagent-denied.json")"
+    [ -n "$calls" ] || { echo "没有 subagent 调用产物（判据未触发：模型没调用）" >&2; return 1; }
+
+    # 找到 agent=general 的那次调用
+    rec="$(printf '%s\n' "$calls" | python3 -c '
+import json, sys
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if r.get("agent") == "general":
+        print(json.dumps(r, ensure_ascii=False))
+        break
+')"
+    [ -n "$rec" ] || { echo "没有 agent=general 的 subagent 调用（判据未触发）" >&2; return 1; }
+
+    # 必须以 error 状态结束，且错误来自权限层
+    local status denied
+    status="$(printf '%s\n' "$rec" | python3 -c 'import json,sys;print(json.loads(sys.stdin.readline()).get("status") or "")')"
+    [ "$status" = "error" ] || {
+        echo "agent=general 的 subagent 调用没有以 error 结束（status=$status）—— 白名单没生效" >&2
+        printf '%s\n' "$rec" >&2
+        return 1
+    }
+    denied="$(printf '%s\n' "$rec" | python3 -c '
+import json, sys
+r = json.loads(sys.stdin.readline())
+out = (r.get("output_prefix") or "") + " " + (r.get("error") or "")
+print("yes" if ("Permission denied" in out or "permission.rejected" in out) else "no")
+')"
+    [ "$denied" = "yes" ] || {
+        echo "agent=general 的调用报错里没有权限拒绝痕迹：" >&2
+        printf '%s\n' "$rec" >&2
+        return 1
+    }
 }
