@@ -726,6 +726,34 @@ print(",".join(d.get("changed_files") or []))
         *) echo "summary.changed_files 里没有 smoke.txt（实际：$changed）" >&2; return 1 ;;
     esac
 
+    # 交付面证据（静默失败检测）：真实交付必须有写盘调用或产物，
+    # 且不得被判成 no_work_evidence（防误报）。
+    local nowork nwrite
+    nowork="$(l2_first_field "$calls" summary | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print("none"); raise SystemExit
+print("true" if d.get("no_work_evidence") is True else "false")
+')"
+    nwrite="$(l2_first_field "$calls" summary | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print("0"); raise SystemExit
+print(d.get("write_tool_calls", 0))
+')"
+    [ "$nowork" != "true" ] || {
+        echo "真实交付被判成 no_work_evidence=true（误报）：write_tool_calls=$nwrite" >&2
+        return 1
+    }
+    [ "${nwrite:-0}" -ge 1 ] || {
+        echo "write_tool_calls=$nwrite —— 真实交付没有写盘调用（证据口径异常）" >&2
+        return 1
+    }
+
     # ④ 委托的 project_dir 必须就是 fixture 根（§8.2：防「委托跑到仓库根」伪装通过）
     local pdir expected
     pdir="$(l2_first_field "$calls" project_dir)"
