@@ -1,3 +1,12 @@
 # Bats ephemeral test data
 .bats-tmp/
-$BATS_TEST_TMPDIR/
+
+# L2 runtime-test scratch space (probe + L2 real-run artifacts: stdout NDJSON,
+# logs, bats TMPDIR).
+#
+# The previous entry `$BATS_TEST_TMPDIR/` was ineffective and has been removed:
+# .gitignore does NOT expand environment variables — it only matches a path
+# whose literal name is `$BATS_TEST_TMPDIR`. The real knob is the `TMPDIR`
+# environment variable (bats-core sets `BATS_TMPDIR="${TMPDIR:-/tmp}"` and
+# derives BATS_TEST_TMPDIR from it), so the directory to ignore is a fixed path.
+.tmp-l2/
