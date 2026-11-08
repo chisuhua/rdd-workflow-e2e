@@ -754,6 +754,34 @@ print(d.get("write_tool_calls", 0))
         return 1
     }
 
+    # 契约：真实交付的 outcome 必须是 succeeded（不得被降级为 unverified），
+    # 且 host_outcome 保留宿主原值。
+    local outc host_outc
+    outc="$(l2_first_field "$calls" summary | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print(""); raise SystemExit
+print(d.get("outcome") or "")
+')"
+    host_outc="$(l2_first_field "$calls" summary | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read() or "{}")
+except Exception:
+    print(""); raise SystemExit
+print(d.get("host_outcome") or "")
+')"
+    [ "$outc" = "succeeded" ] || {
+        echo "真实交付的 outcome 不是 succeeded（实际：[$outc]）—— 静默失败检测误报" >&2
+        return 1
+    }
+    [ "$host_outc" = "succeeded" ] || {
+        echo "host_outcome 不是 succeeded（实际：[$host_outc]）" >&2
+        return 1
+    }
+
     # ④ 委托的 project_dir 必须就是 fixture 根（§8.2：防「委托跑到仓库根」伪装通过）
     local pdir expected
     pdir="$(l2_first_field "$calls" project_dir)"
