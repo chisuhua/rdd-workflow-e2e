@@ -10,3 +10,6 @@
 # environment variable (bats-core sets `BATS_TMPDIR="${TMPDIR:-/tmp}"` and
 # derives BATS_TEST_TMPDIR from it), so the directory to ignore is a fixed path.
 .tmp-l2/
+
+# 双 session 运行时状态（活的 session id / pair 登记表，非版本化）
+.rddf/
