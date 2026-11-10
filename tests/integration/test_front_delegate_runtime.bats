@@ -22,7 +22,7 @@
 #   （只影响 front 自己；被委托的工程 session 仍用 build agent 配置的模型）
 #
 #   用例清单：L2-1…L2-8（v2.3 契约）+ L2-9…L2-14（v2.5 知识获取契约）
-#             + L2-16…L2-20（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel）。
+#             + L2-16…L2-21（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel + 名册兜底）。
 #   L2-7（busy）在单进程下不可达：delegate 是同步调用，见该用例内的说明。
 #
 #   TMPDIR 必须先 mkdir -p 且指向 /workspace 下（探针 P5 结论）：
@@ -1760,6 +1760,54 @@ print(e.get("state") or "")
     [ "$st" = "suspended" ] || {
         echo "pair 条目的 state 不是 suspended（=[$st]）" >&2
         python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1])), ensure_ascii=False, indent=1))' "$pair" >&2
+        return 1
+    }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-21：front 换代后 sessions 仍能找回旧后端（兜底路径）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-21: front 换代后 sessions 仍能找回旧后端（兜底路径）" {
+    # 前置：复用 dispatch 场景的产物（已有后端 + 它的 session id）——**不额外烧额度**
+    l2_run_scenario dispatch
+    local fixture sid calls
+    fixture="$(cat "$L2_ROOT/run-dispatch.fixture" 2>/dev/null || echo "$L2_FIXTURE_ROOT/engproj-dispatch")"
+    sid="$(l2_tool_calls dispatch "$L2_ROOT/run-dispatch.json" | head -1 | python3 -c 'import json,sys;print(json.loads(sys.stdin.readline()).get("session_id") or "")')"
+    [ -n "$sid" ] || { echo "dispatch 场景没有产出后端 id" >&2; return 1; }
+
+    # 用一个**新的 front 会话**（新的 --session id ⇒ 没有 roster 快路径）查名册
+    local prompt
+    prompt="$(cat <<PROMPT_EOF
+只做这一件事：用 sessions 工具查一次名册，把查到的每个后端的 session_id 报出来。
+**不要**派发任何任务、不要调用 dispatch、不要改任何文件。
+如果查不到任何后端，直接汇报「没有查到」即可，不要重试。
+PROMPT_EOF
+)"
+    l2_front_run "run-rebuild" "$prompt" "$fixture" || true
+
+    calls="$(l2_tool_calls sessions "$L2_ROOT/run-rebuild.json")"
+    [ -n "$calls" ] || { echo "换代后的 front 没有 sessions 调用产物" >&2; return 1; }
+
+    # 断言：名册里**找得到**先前那个后端（兜底路径：全库 list + cursor 续扫 + metadata 过滤）
+    local found
+    found="$(printf '%s\n' "$calls" | python3 -c '
+import json, sys
+want = sys.argv[1]
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    s = json.dumps(r.get("summary") or {}, ensure_ascii=False)
+    if want and want in s:
+        print("yes")
+        break
+else:
+    print("no")
+' "$sid")"
+    [ "$found" = "yes" ] || {
+        echo "换代后的 sessions 没找回旧后端 $sid（兜底路径失效）" >&2
+        printf '%s\n' "$calls" >&2
         return 1
     }
 }
