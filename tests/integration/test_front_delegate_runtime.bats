@@ -22,8 +22,8 @@
 #   （只影响 front 自己；被委托的工程 session 仍用 build agent 配置的模型）
 #
 #   用例清单：L2-1…L2-8（v2.3 契约）+ L2-9…L2-14（v2.5 知识获取契约）
-#             + L2-16…L2-22（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel
-#                           + 名册兜底 + 往返切换）。
+#             + L2-16…L2-23（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel
+#                           + 名册兜底 + 往返切换 + 运行中 resume 被拒）。
 #   L2-7（busy）在单进程下不可达：delegate 是同步调用，见该用例内的说明。
 #
 #   TMPDIR 必须先 mkdir -p 且指向 /workspace 下（探针 P5 结论）：
@@ -732,6 +732,18 @@ dispatch 的参数严格按下面填：
 - acceptance: "文件 ${fixture}/p.txt 存在且内容为 p"
 suspend 的参数：session_id 用 dispatch 返回的那个 id。
 dispatch 返回后**不要**等任务跑完，直接调 suspend。如果 dispatch 被拒绝就直接汇报，不要重试。
+PROMPT_EOF
+        ;;
+    resume-running)
+        cat <<PROMPT_EOF
+只做这一件事：在同一个工程目录 ${fixture} 上依次做**两步**，做完一步再做下一步：
+1) 用 dispatch 派发一次：project_dir=${fixture}，agent=build，task/goal 写「新建 r1.txt，内容 r1」，
+   goal_key={"intent":"rr-one"}，scope=["r1.txt"]，acceptance="文件 ${fixture}/r1.txt 存在且内容为 r1"。
+   记下返回的 session_id（记作 A_ID）。
+2) **紧接着**（不要等待、不要先查 sessions）用 dispatch **续接同一个后端**：
+   project_dir=${fixture}，agent=build，goal_key={"intent":"rr-one"}，resume_session=A_ID，
+   task/goal 写「再新建 r2.txt」，scope=["r2.txt"]，acceptance="文件 ${fixture}/r2.txt 存在"。
+把第 2 步的**完整返回**（成功或报错）如实报出来；如果被拒绝，不要重试、不要换参数。
 PROMPT_EOF
         ;;
     roundtrip)
@@ -2034,4 +2046,72 @@ print("\n".join(s["id"] for s in data if (s.get("metadata") or {}).get("delegate
         curl -s -m 10 -o /dev/null -X DELETE -u "opencode:$pw" "http://127.0.0.1:$port/api/session/$sid" 2>/dev/null && n=$((n+1))
     done
     echo "已清理 delegated 后端 $n 个" >&2
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-23：运行中 resume 被拒 —— AC19 的异步面（不把简报排进正在跑的会话）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-23: 运行中 resume 被拒 —— dispatch(resume=正在跑的后端) 报错且不写 dispatched 行" {
+    l2_run_scenario resume-running
+
+    local dcalls a_id
+    dcalls="$(l2_tool_calls dispatch "$L2_ROOT/run-resume-running.json")"
+    [ -n "$dcalls" ] || { echo "没有 dispatch 调用产物" >&2; return 1; }
+
+    a_id="$(printf '%s\n' "$dcalls" | python3 -c '
+import json, sys
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if r.get("session_id") and not r.get("resume_session"):
+        print(r["session_id"]); break
+')"
+    [ -n "$a_id" ] || { echo "第一次 dispatch 没拿到 session_id" >&2; return 1; }
+
+    # 第二次（resume=A）必须是**错误**，且文案指向「运行中」
+    local verdict
+    verdict="$(printf '%s\n' "$dcalls" | python3 -c '
+import json, sys
+want = sys.argv[1]
+hit = None
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if r.get("resume_session") != want:
+        continue
+    hit = r
+if hit is None:
+    print("no-resume-call")
+elif hit.get("status") == "error" and "运行中" in str(hit.get("error") or ""):
+    print("rejected")
+else:
+    print("not-rejected:" + str(hit.get("status")) + ":" + str(hit.get("error"))[:120])
+' "$a_id")"
+    [ "$verdict" = "rejected" ] || { echo "运行中 resume 未被拒：$verdict" >&2; return 1; }
+
+    # 拒绝必须**零副作用**：fixture 的 ledger 里 dispatched 行只有第一次那一条
+    local fixture pair ledger n
+    fixture="$(cat "$L2_ROOT/run-resume-running.fixture" 2>/dev/null || echo "")"
+    [ -n "$fixture" ] || { echo "没有 fixture 路径" >&2; return 1; }
+    ledger="$fixture/.rddf/state/ledger.jsonl"
+    [ -f "$ledger" ] || { echo "fixture 下没有 ledger.jsonl" >&2; return 1; }
+    n="$(python3 -c '
+import json, sys
+c = 0
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get("event") == "dispatched":
+        c += 1
+print(c)
+' "$ledger")"
+    [ "$n" = "1" ] || { echo "dispatched 行应为 1（被拒的那次不得落行），实际 $n" >&2; return 1; }
 }
