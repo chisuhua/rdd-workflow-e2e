@@ -21,7 +21,8 @@
 #   bats tests/integration/test_front_delegate_runtime.bats
 #   （只影响 front 自己；被委托的工程 session 仍用 build agent 配置的模型）
 #
-#   用例清单：L2-1…L2-8（v2.3 契约）+ L2-9…L2-14（v2.5 知识获取契约）。
+#   用例清单：L2-1…L2-8（v2.3 契约）+ L2-9…L2-14（v2.5 知识获取契约）
+#             + L2-16…L2-20（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel）。
 #   L2-7（busy）在单进程下不可达：delegate 是同步调用，见该用例内的说明。
 #
 #   TMPDIR 必须先 mkdir -p 且指向 /workspace 下（探针 P5 结论）：
@@ -200,6 +201,8 @@ for ev in events:
     elif isinstance(raw_out, dict):
         summary = raw_out
     err = st.get("error")
+    # ⚠️ 工具级错误的 `error` 可能是**字符串**（也可能是 {message:...} 对象）——两种都要取到
+    err_text = err if isinstance(err, str) else (err.get("message") if isinstance(err, dict) else None)
     rec = {
         "start_rel": round((start - t0) / 1000.0, 1) if start else None,
         "end_rel": round((end - t0) / 1000.0, 1) if end else None,
@@ -213,7 +216,80 @@ for ev in events:
         "resume_session": inp.get("resume_session"),
         "acceptance_type": type(inp.get("acceptance")).__name__,
         "status": st.get("status"),
-        "error": err.get("message") if isinstance(err, dict) else None,
+        "error": err_text,
+        "summary": summary,
+    }
+    out.append(json.dumps(rec, ensure_ascii=False))
+print("\n".join(out))
+PYEOF
+}
+
+# ── 通用工具调用解析（任意 tool；字段同 l2_delegate_calls，另有 tool/state/delivery_known）───
+# 输出：每行一个 JSON 对象 {tool,start_rel,end_rel,dur,outcome,session_id,state,
+#       delivery_known,suspended,project_dir,scope,resume_session,session_id_in,status,error,summary}
+l2_tool_calls() {
+    local tool_name="$1" file="$2"
+    python3 - "$tool_name" "$file" <<'PYEOF' 2>/dev/null || true
+import json, sys
+
+tool_name = sys.argv[1]
+try:
+    raw = open(sys.argv[2]).read()
+except Exception:
+    raise SystemExit
+
+events = []
+for line in raw.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        events.append(json.loads(line))
+    except Exception:
+        pass
+if not events:
+    raise SystemExit
+
+t0 = events[0].get("timestamp") or 0
+out = []
+for ev in events:
+    if ev.get("type") != "tool_use":
+        continue
+    part = ev.get("part") or {}
+    if part.get("tool") != tool_name:
+        continue
+    st = part.get("state") or {}
+    tm = st.get("time") or {}
+    start, end = tm.get("start"), tm.get("end")
+    inp = st.get("input") or {}
+    summary = {}
+    raw_out = st.get("output")
+    if isinstance(raw_out, str):
+        try:
+            summary = json.loads(raw_out)
+        except Exception:
+            summary = {}
+    elif isinstance(raw_out, dict):
+        summary = raw_out
+    err = st.get("error")
+    # ⚠️ 工具级错误的 `error` 可能是**字符串**（也可能是 {message:...} 对象）——两种都要取到
+    err_text = err if isinstance(err, str) else (err.get("message") if isinstance(err, dict) else None)
+    rec = {
+        "tool": tool_name,
+        "start_rel": round((start - t0) / 1000.0, 1) if start else None,
+        "end_rel": round((end - t0) / 1000.0, 1) if end else None,
+        "dur": round((end - start) / 1000.0, 2) if (start and end) else None,
+        "outcome": summary.get("outcome"),
+        "session_id": summary.get("session_id"),
+        "state": summary.get("state"),
+        "delivery_known": summary.get("delivery_known"),
+        "suspended": summary.get("suspended"),
+        "project_dir": inp.get("project_dir"),
+        "scope": inp.get("scope"),
+        "resume_session": inp.get("resume_session"),
+        "session_id_in": inp.get("session_id"),
+        "status": st.get("status"),
+        "error": err_text,
         "summary": summary,
     }
     out.append(json.dumps(rec, ensure_ascii=False))
@@ -411,6 +487,34 @@ for line in sys.stdin.read().splitlines():
 }
 
 
+# l2_first_ok_field_for_agent —— 取**首个成功**（有 session_id）的同 agent 调用的某字段。
+# 与 l2_first_field_for_agent 的区别：后者取**第一次**调用（哪怕它因参数错误失败）。
+# 用途：模型偶尔会先发出一次参数不合法的调用再重试 —— 那次调用没有 session_id，
+# 断言必须跳过它，否则用例会**随模型行为随机失败**。
+l2_first_ok_field_for_agent() {
+    local calls="$1" agent="$2" field="$3"
+    [ -z "$calls" ] && return 0
+    printf '%s\n' "$calls" | python3 -c "
+import json, sys
+agent = '$agent'
+field = '$field'
+for line in sys.stdin.read().splitlines():
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if (r.get('agent') or 'build') != agent:
+        continue
+    if not r.get('session_id'):
+        continue
+    v = r.get(field)
+    if isinstance(v, (dict, list)):
+        print(json.dumps(v, ensure_ascii=False))
+    else:
+        print('' if v is None else v)
+    break
+"
+}
+
 # l2_run_scenario <scenario> —— 跑（或复用）一个场景的真实委托，产物落 $L2_ROOT：
 #   run-<scenario>.json   stdout NDJSON
 #   run-<scenario>.meta   退出码 / 耗时 / 传入的 session id
@@ -545,6 +649,46 @@ PROMPT_EOF
 1) agent=explore，任务：在 shell 里执行 bash -c 'touch /tmp/opencode/l2-bash-probe'，执行后把结果（包括任何错误原文）原样返回。
 2) agent=librarian，任务：在 shell 里执行 curl -o /tmp/opencode/l2-curl-probe https://example.com，执行后把结果（包括任何错误原文）原样返回。
 如果被权限层拒绝，原样汇报错误信息即可，不要换写法绕过、不要重试。
+PROMPT_EOF
+        ;;
+    dispatch)
+        cat <<PROMPT_EOF
+只做这一件事：用 dispatch 工具异步派发一次任务给工程 session，然后用 sessions 工具查一次名册。
+dispatch 的参数严格按下面填：
+- project_dir: ${fixture}
+- agent: build
+- task: 新建 d.txt，内容 d
+- goal: 新建 d.txt
+- goal_key: {"intent": "create-d-txt"}
+- scope: ["d.txt"]
+- acceptance: "文件 ${fixture}/d.txt 存在且内容为 d"
+goal_key 必须是对象且含 intent 字段（小写 kebab slug）；acceptance 写成字符串。
+dispatch 返回后**不要**等任务跑完，直接调 sessions 查一次名册即可。
+如果 dispatch 被拒绝，直接汇报结果即可，不要重复尝试、不要换参数再试。
+PROMPT_EOF
+        ;;
+    slot)
+        cat <<PROMPT_EOF
+只做这一件事：用 dispatch 工具**连续派发两次**到同一个工程目录 ${fixture}：
+- 第一次：scope ["s1.txt"]，goal_key {"intent": "slot-one"}
+- 第二次：scope ["s2.txt"]，goal_key {"intent": "slot-two"}
+两次的 project_dir 都是 ${fixture}，agent 都是 build，acceptance 写成字符串。
+注意：第二次**预期会被拒绝**（同一工作树同时只允许一个后端在跑）——被拒就直接汇报结果，**不要**重试、不要换参数再试。
+PROMPT_EOF
+        ;;
+    suspend)
+        cat <<PROMPT_EOF
+只做这一件事：先用 dispatch 工具异步派发一次任务给工程 session，拿到返回的 session_id 后，再用 suspend 工具暂停这个后端。
+dispatch 的参数严格按下面填：
+- project_dir: ${fixture}
+- agent: build
+- task: 新建 p.txt，内容 p
+- goal: 新建 p.txt
+- goal_key: {"intent": "create-p-txt"}
+- scope: ["p.txt"]
+- acceptance: "文件 ${fixture}/p.txt 存在且内容为 p"
+suspend 的参数：session_id 用 dispatch 返回的那个 id。
+dispatch 返回后**不要**等任务跑完，直接调 suspend。如果 dispatch 被拒绝就直接汇报，不要重试。
 PROMPT_EOF
         ;;
     *)
@@ -1204,13 +1348,14 @@ for l in sys.stdin.read().splitlines():
     calls="$(l2_delegate_calls "$L2_ROOT/run-knowledge.json")"
     [ -n "$calls" ] || { echo "没有 delegate 调用产物" >&2; return 1; }
 
-    sid="$(l2_first_field_for_agent "$calls" explore session_id)"
+    # ⚠️ 取**首个成功**调用：模型偶尔先发一次参数不合法的调用再重试（L2-10 曾因此随机失败）
+    sid="$(l2_first_ok_field_for_agent "$calls" explore session_id)"
     case "$sid" in
         ses_*) : ;;
         *) echo "没有拿到真实工程 session id：[$sid]（委托失败或判据未触发）" >&2; return 1 ;;
     esac
 
-    summary="$(l2_first_field_for_agent "$calls" explore summary)"
+    summary="$(l2_first_ok_field_for_agent "$calls" explore summary)"
     kind="$(printf '%s' "$summary" | python3 -c '
 import json, sys
 try:
@@ -1394,6 +1539,227 @@ print("yes" if ("Permission denied" in out or "permission.rejected" in out) else
     [ "$denied" = "yes" ] || {
         echo "agent=general 的调用报错里没有权限拒绝痕迹：" >&2
         printf '%s\n' "$rec" >&2
+        return 1
+    }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-16：四工具门控 —— dispatch/sessions/suspend/cancel 只对 front 可见
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-16: 四工具门控 —— dispatch/sessions/suspend/cancel 只对 front 可见，其它 agent 看不到" {
+    # 断言目标（结构化事实，来自 `opencode debug agents` 的权限矩阵）：
+    #   - front 的权限列表里，四个新 action 各有一条 effect=allow；
+    #   - 其它 agent 对这四个 action **一条 allow 都不能有**；
+    #   - 四个 action 各自独立（不是同一个 action 挂四个工具）。
+    local agents
+    agents="$(l2_debug_agents)"
+    [ -n "$agents" ] || { echo "opencode debug agents 无输出" >&2; return 1; }
+
+    local matrix
+    matrix="$(printf '%s' "$agents" | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw)
+except Exception:
+    data = [json.loads(l) for l in raw.splitlines() if l.strip()]
+if isinstance(data, dict):
+    data = [data]
+ACTIONS = ["delegate_dispatch", "delegate_sessions", "delegate_suspend", "delegate_cancel"]
+for a in data:
+    name = a.get("name")
+    perms = a.get("permissions") or []
+    for act in ACTIONS:
+        rules = [p for p in perms if isinstance(p, dict) and p.get("action") == act]
+        eff = ",".join(str(p.get("effect")) for p in rules)
+        print("%s|%s|%s" % (name, act, eff))
+')"
+    [ -n "$matrix" ] || { echo "权限矩阵解析失败" >&2; return 1; }
+
+    local act
+    for act in delegate_dispatch delegate_sessions delegate_suspend delegate_cancel; do
+        # front 必须有 allow
+        local front_eff
+        front_eff="$(printf '%s\n' "$matrix" | awk -F'|' -v a="$act" '$1=="front" && $2==a {print $3}')"
+        [ -n "$front_eff" ] || { echo "权限矩阵里没有 front 的 $act 规则" >&2; return 1; }
+        case ",$front_eff," in
+            *,allow,*) : ;;
+            *) echo "front 的 $act 规则里没有 allow（实际：$front_eff）" >&2; return 1 ;;
+        esac
+        # 其它 agent 一条 allow 都不能有
+        local leaks
+        leaks="$(printf '%s\n' "$matrix" | awk -F'|' -v a="$act" '$1!="front" && $2==a && $3 ~ /allow/ {print $1}')"
+        [ -z "$leaks" ] || {
+            echo "有非 front agent 拿到了 $act 的 allow：$leaks" >&2
+            return 1
+        }
+    done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-17：dispatch 真派发 —— 立即返回 + pair 登记 state/work_root + ledger dispatched 行
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-17: dispatch 真派发 —— 立即返回 + pair 登记 work_root/state + ledger 有 dispatched 行" {
+    l2_run_scenario dispatch
+
+    local calls
+    calls="$(l2_tool_calls dispatch "$L2_ROOT/run-dispatch.json")"
+    [ -n "$calls" ] || { echo "没有 dispatch 调用产物" >&2; return 1; }
+
+    # ① 返回里必须有 session_id 与 state（active 或 dispatching）
+    local rec
+    rec="$(printf '%s\n' "$calls" | head -1)"
+    local sid state
+    sid="$(printf '%s' "$rec" | python3 -c 'import json,sys;print(json.loads(sys.stdin.read()).get("session_id") or "")')"
+    state="$(printf '%s' "$rec" | python3 -c 'import json,sys;print(json.loads(sys.stdin.read()).get("state") or "")')"
+    [ -n "$sid" ] || { echo "dispatch 的返回里没有 session_id" >&2; return 1; }
+    case "$state" in
+        active|dispatching) : ;;
+        *) echo "dispatch 的 state 异常：[$state]" >&2; return 1 ;;
+    esac
+
+    # ② pair.json 有该条目，且含 work_root 与 state
+    local fixture pair
+    fixture="$(cat "$L2_ROOT/run-dispatch.fixture" 2>/dev/null || echo "$L2_FIXTURE_ROOT/engproj-dispatch")"
+    pair="$fixture/.rddf/state/pair.json"
+    [ -f "$pair" ] || { echo "fixture 下没有 pair.json（dispatch 没有登记）" >&2; return 1; }
+    python3 - "$pair" "$sid" "$fixture" <<'PYEOF'
+import json, os, sys
+pair_path, sid, fixture = sys.argv[1], sys.argv[2], sys.argv[3]
+data = json.load(open(pair_path))
+entry = (data.get("pairs") or {}).get(sid)
+if not entry:
+    print("pair.json 里没有该工程 session 的登记条目" % ())
+    sys.exit(1)
+if not entry.get("work_root"):
+    print("pair 条目缺 work_root" % ())
+    sys.exit(1)
+if entry.get("state") not in ("dispatching", "active", "idle", "suspended", "tombstone"):
+    print("pair 条目的 state 非法：%r" % (entry.get("state"),))
+    sys.exit(1)
+if os.path.realpath(entry["work_root"]) != os.path.realpath(fixture):
+    print("work_root 不等于 fixture 根：%r != %r" % (entry["work_root"], fixture))
+    sys.exit(1)
+PYEOF
+    [ $? -eq 0 ] || { echo "pair.json 的登记断言失败" >&2; return 1; }
+
+    # ③ ledger 里有 event:"dispatched" 行
+    local ledger
+    ledger="$fixture/.rddf/state/ledger.jsonl"
+    [ -f "$ledger" ] || { echo "fixture 下没有 ledger.jsonl" >&2; return 1; }
+    grep -q '"event":"dispatched"' "$ledger" || {
+        echo "ledger 里没有 event:\"dispatched\" 行：" >&2
+        cat "$ledger" >&2
+        return 1
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-18：sessions 只读 —— 查得到名册，且**不投递 prompt**（观测面不污染）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-18: sessions 只读 —— 查得到名册，且观测面不投递 prompt、不写 ledger" {
+    # 与 L2-17 **共用** dispatch 场景产物（额度共享，见文件头「额度控制」）
+    l2_run_scenario dispatch
+
+    local calls
+    calls="$(l2_tool_calls sessions "$L2_ROOT/run-dispatch.json")"
+    [ -n "$calls" ] || { echo "事件流里没有 sessions 调用（判据未被触发）" >&2; return 1; }
+
+    # ① sessions 的入参**不得**含任何简报字段（它是只读观测面）
+    local leak
+    leak="$(printf '%s\n' "$calls" | python3 -c '
+import json, sys
+bad = []
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    for k in ("task", "goal", "scope", "acceptance", "grants"):
+        if r.get(k):
+            bad.append("%s=%r" % (k, r.get(k)))
+print(",".join(bad))
+')"
+    [ -z "$leak" ] || { echo "sessions 的入参里出现了简报字段：$leak" >&2; return 1; }
+
+    # ② 观测面**不写 ledger**：行数必须仍只有 dispatch 那一行
+    local fixture ledger n
+    fixture="$(cat "$L2_ROOT/run-dispatch.fixture" 2>/dev/null || echo "$L2_FIXTURE_ROOT/engproj-dispatch")"
+    ledger="$fixture/.rddf/state/ledger.jsonl"
+    [ -f "$ledger" ] || { echo "fixture 下没有 ledger.jsonl" >&2; return 1; }
+    n="$(grep -c . "$ledger" || true)"
+    [ "$n" = "1" ] || {
+        echo "ledger 行数不是 1（=$n）——观测面写了 ledger：" >&2
+        cat "$ledger" >&2
+        return 1
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-19：单槽 —— 同一工作树第二个 dispatch 被拒（错误含占槽者 id）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-19: 单槽 —— 同一工作树第二个 dispatch 被拒（错误含占槽者 id）" {
+    l2_run_scenario slot
+
+    local calls n rejected
+    calls="$(l2_tool_calls dispatch "$L2_ROOT/run-slot.json")"
+    [ -n "$calls" ] || { echo "没有 dispatch 调用产物" >&2; return 1; }
+
+    n="$(printf '%s\n' "$calls" | grep -c . || true)"
+    [ "$n" -ge 2 ] || { echo "dispatch 调用只有 $n 次（判据未被触发：需要两次）" >&2; return 1; }
+
+    # 第二次必须被拒，且错误里含「占槽者」的可操作信息
+    rejected="$(printf '%s\n' "$calls" | sed -n '2p' | python3 -c '
+import json, sys
+r = json.loads(sys.stdin.readline())
+out = (r.get("error") or "") + " " + json.dumps(r.get("summary") or {}, ensure_ascii=False)
+print("yes" if ("已占用" in out or "占用" in out) else "no")
+')"
+    [ "$rejected" = "yes" ] || {
+        echo "第二次 dispatch 没有被「工作树已占用」拒绝：" >&2
+        printf '%s\n' "$calls" | sed -n '2p' >&2
+        return 1
+    }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-20：suspend 暂停 —— 释放槽位 + pair 的 state 变 suspended（仍可 resume）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-20: suspend 暂停 —— 释放槽位 + pair 的 state 变 suspended" {
+    l2_run_scenario suspend
+
+    local calls
+    calls="$(l2_tool_calls suspend "$L2_ROOT/run-suspend.json")"
+    [ -n "$calls" ] || { echo "事件流里没有 suspend 调用（判据未被触发）" >&2; return 1; }
+
+    # ① 返回里 suspended=true
+    local rec
+    rec="$(printf '%s\n' "$calls" | head -1)"
+    local suspended
+    suspended="$(printf '%s' "$rec" | python3 -c 'import json,sys;r=json.loads(sys.stdin.read());print("yes" if r.get("suspended") is True else "no")')"
+    [ "$suspended" = "yes" ] || {
+        echo "suspend 的返回里 suspended 不是 true：" >&2
+        printf '%s' "$rec" >&2
+        return 1
+    }
+
+    # ② pair.json 里该条目的 state 变成 suspended
+    local fixture pair sid
+    fixture="$(cat "$L2_ROOT/run-suspend.fixture" 2>/dev/null || echo "$L2_FIXTURE_ROOT/engproj-suspend")"
+    pair="$fixture/.rddf/state/pair.json"
+    [ -f "$pair" ] || { echo "fixture 下没有 pair.json" >&2; return 1; }
+    sid="$(printf '%s' "$rec" | python3 -c 'import json,sys;print(json.loads(sys.stdin.read()).get("session_id") or "")')"
+    [ -n "$sid" ] || { echo "suspend 的返回里没有 session_id" >&2; return 1; }
+    local st
+    st="$(python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+e = (data.get("pairs") or {}).get(sys.argv[2]) or {}
+print(e.get("state") or "")
+' "$pair" "$sid")"
+    [ "$st" = "suspended" ] || {
+        echo "pair 条目的 state 不是 suspended（=[$st]）" >&2
+        python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1])), ensure_ascii=False, indent=1))' "$pair" >&2
         return 1
     }
 }
