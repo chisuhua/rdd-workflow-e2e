@@ -22,7 +22,8 @@
 #   （只影响 front 自己；被委托的工程 session 仍用 build agent 配置的模型）
 #
 #   用例清单：L2-1…L2-8（v2.3 契约）+ L2-9…L2-14（v2.5 知识获取契约）
-#             + L2-16…L2-21（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel + 名册兜底）。
+#             + L2-16…L2-22（v2.7 异步派发面契约：dispatch/sessions/suspend/cancel
+#                           + 名册兜底 + 往返切换）。
 #   L2-7（busy）在单进程下不可达：delegate 是同步调用，见该用例内的说明。
 #
 #   TMPDIR 必须先 mkdir -p 且指向 /workspace 下（探针 P5 结论）：
@@ -515,6 +516,43 @@ for line in sys.stdin.read().splitlines():
 "
 }
 
+# ── 清理本场景创建的后端 session ────────────────────────────────────────────
+# 为什么需要：**全局并发上限**（RDDF_MAX_ACTIVE_BACKENDS，默认 3）统计的是
+# **所有** delegated 后端 ⇒ E2E 自己跑出来的后端若不清理，几个场景之后就把上限占满，
+# 后续场景的 dispatch 会被「并发上限已达」误拒（实测踩过）。
+# 需要本机后台服务的凭据；拿不到就**跳过**（不判失败）。
+l2_cleanup_backends() {
+    local fixture="$1"
+    local pair="$fixture/.rddf/state/pair.json"
+    [ -f "$pair" ] || return 0
+    local svc="$HOME/.config/opencode/service.json"
+    [ -f "$svc" ] || { echo "  （无 service.json，跳过后端清理）" >&2; return 0; }
+    local pw port
+    pw="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("password",""))' "$svc" 2>/dev/null)" || return 0
+    [ -n "$pw" ] || return 0
+    port="$(python3 -c '
+import json, os, sys
+try:
+    print(json.load(open(sys.argv[1])).get("port") or "")
+except Exception:
+    print("")
+' "$svc" 2>/dev/null)"
+    [ -n "$port" ] || port=49374
+    local ids n
+    ids="$(python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+print("\n".join(sorted((data.get("pairs") or {}).keys()))
+' "$pair" 2>/dev/null)" || return 0
+    n=0
+    for sid in $ids; do
+        if curl -s -m 10 -o /dev/null -X DELETE -u "opencode:$pw" "http://127.0.0.1:$port/api/session/$sid" 2>/dev/null; then
+            n=$((n+1))
+        fi
+    done
+    echo "  （已清理本场景后端 $n 个）" >&2
+}
+
 # l2_run_scenario <scenario> —— 跑（或复用）一个场景的真实委托，产物落 $L2_ROOT：
 #   run-<scenario>.json   stdout NDJSON
 #   run-<scenario>.meta   退出码 / 耗时 / 传入的 session id
@@ -556,6 +594,11 @@ l2_run_scenario() {
         echo "!! 场景 [$scenario] 的真实委托**超时**（timeout ${L2_CASE_TIMEOUT}s）→ 本用例判 FAIL" >&2
     else
         echo "场景 [$scenario] 真实委托结束：exit_code=${rc:-?} elapsed=${elapsed:-?}s" >&2
+    fi
+    # 清理本场景创建的后端（否则残留会占满**全局**并发上限，让后续场景被误拒）。
+    # dispatch 场景例外：L2-18 / L2-21 / L2-22 依赖它的后端存在。
+    if [ "$scenario" != "dispatch" ]; then
+        l2_cleanup_backends "$fixture"
     fi
 }
 
@@ -689,6 +732,25 @@ dispatch 的参数严格按下面填：
 - acceptance: "文件 ${fixture}/p.txt 存在且内容为 p"
 suspend 的参数：session_id 用 dispatch 返回的那个 id。
 dispatch 返回后**不要**等任务跑完，直接调 suspend。如果 dispatch 被拒绝就直接汇报，不要重试。
+PROMPT_EOF
+        ;;
+    roundtrip)
+        cat <<PROMPT_EOF
+只做这一件事：在同一个工程目录 ${fixture} 上完成一次**往返切换**，按顺序做下面 5 步，**每步只做一次**，做完一步再做下一步：
+1) 用 dispatch 派发 A：project_dir=${fixture}，agent=build，task/goal 写「新建 r1.txt，内容 r1」，
+   goal_key={"intent":"rt-one"}，scope=["r1.txt"]，acceptance="文件 ${fixture}/r1.txt 存在且内容为 r1"。
+   记下 dispatch 返回的 session_id（记作 A_ID）。
+2) 用 suspend 暂停 A：session_id=A_ID。
+3) 用 dispatch 派发 B：project_dir=${fixture}，agent=build，task/goal 写「新建 r2.txt，内容 r2」，
+   goal_key={"intent":"rt-two"}，scope=["r2.txt"]，acceptance="文件 ${fixture}/r2.txt 存在且内容为 r2"。
+   记下 dispatch 返回的 session_id（记作 B_ID）。
+4) 用 sessions 查一次名册，把查到的后端 session_id 都报出来。
+5) 用 suspend 暂停 B：session_id=B_ID；然后用 dispatch 续接 A：project_dir=${fixture}，
+   agent=build，goal_key={"intent":"rt-one"}，resume_session=A_ID，
+   task/goal 写「继续 r1.txt 相关工作」，scope=["r1.txt"]，acceptance="文件 ${fixture}/r1.txt 仍存在"。
+注意事项：
+- goal_key 必须是对象且含 intent 字段（小写 kebab slug）；acceptance 写成字符串。
+- 每一步如果被拒绝，**直接汇报被拒的错误并停止后续步骤**，不要重试、不要换参数再试。
 PROMPT_EOF
         ;;
     *)
@@ -1810,4 +1872,166 @@ else:
         printf '%s\n' "$calls" >&2
         return 1
     }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-22：往返切换 —— A → suspend → B → suspend → resume A（A 不被重建）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-22: 往返切换 —— dispatch A → suspend A → dispatch B → suspend B → resume A，A 不被重建" {
+    l2_run_scenario roundtrip
+
+    # ① 至少两次 dispatch（先 A 后 B），session_id 不同
+    local dcalls n
+    dcalls="$(l2_tool_calls dispatch "$L2_ROOT/run-roundtrip.json")"
+    [ -n "$dcalls" ] || { echo "没有 dispatch 调用产物" >&2; return 1; }
+    n="$(printf '%s\n' "$dcalls" | grep -c . || true)"
+    [ "$n" -ge 2 ] || { echo "dispatch 调用只有 $n 次（往返序列未被触发）" >&2; return 1; }
+
+    # ⚠️ 按 **goal_key.intent** 配对、且取「第一个**成功**的调用」——
+    # 模型可能先发一次被拒的调用再重试（那次没有 session_id）⇒ 不能按序号取
+    local a_id b_id
+    a_id="$(printf '%s\n' "$dcalls" | python3 -c '
+import json, sys
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if not r.get("session_id"):
+        continue
+    s = r.get("summary") or {}
+    if (s.get("goal_key") or {}).get("intent") == "rt-one":
+        print(r["session_id"])
+        break
+')"
+    b_id="$(printf '%s\n' "$dcalls" | python3 -c '
+import json, sys
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if not r.get("session_id"):
+        continue
+    s = r.get("summary") or {}
+    if (s.get("goal_key") or {}).get("intent") == "rt-two":
+        print(r["session_id"])
+        break
+')"
+    [ -n "$a_id" ] && [ -n "$b_id" ] || { echo "没拿到 rt-one / rt-two 两个后端的 session_id（往返序列未被触发）" >&2; return 1; }
+    [ "$a_id" != "$b_id" ] || { echo "A 与 B 用了同一个 session_id：$a_id" >&2; return 1; }
+
+    # ② 至少两次 suspend（先 A 后 B）
+    local scalls sn
+    scalls="$(l2_tool_calls suspend "$L2_ROOT/run-roundtrip.json")"
+    [ -n "$scalls" ] || { echo "没有 suspend 调用产物（往返序列未被触发）" >&2; return 1; }
+    sn="$(printf '%s\n' "$scalls" | grep -c . || true)"
+    [ "$sn" -ge 2 ] || { echo "suspend 调用只有 $sn 次（往返序列未被触发）" >&2; return 1; }
+    local suspended_ids
+    suspended_ids="$(printf '%s\n' "$scalls" | python3 -c '
+import json, sys
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    sid = r.get("session_id_in")
+    if sid:
+        print(sid)
+')"
+    printf '%s\n' "$suspended_ids" | grep -qx "$a_id" || { echo "没有对 A 的 suspend（suspended ids: $suspended_ids）" >&2; return 1; }
+    printf '%s\n' "$suspended_ids" | grep -qx "$b_id" || { echo "没有对 B 的 suspend（suspended ids: $suspended_ids）" >&2; return 1; }
+
+    # ③ 最后一次 dispatch 必须带 resume_session=A_ID，且**返回同一个 session_id**（未被重建）
+    # 切回 A 的那次 dispatch：**成功** + 带 resume_session=A_ID + 返回**同一个** session_id
+    local resumed_in last_sid
+    read -r resumed_in last_sid <<EOF
+$(printf '%s\n' "$dcalls" | python3 -c '
+import json, sys
+want = sys.argv[1]
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    if r.get("resume_session") == want and r.get("session_id"):
+        print(r.get("resume_session"), r.get("session_id"))
+        break
+' "$a_id")
+EOF
+    [ "$resumed_in" = "$a_id" ] || { echo "没有一次成功的 dispatch 带 resume_session=A_ID（往返切换未被触发）" >&2; return 1; }
+    [ "$last_sid" = "$a_id" ] || { echo "切回 A 后 session_id 变了（A 被重建）：$a_id -> $last_sid" >&2; return 1; }
+
+    # ④ pair.json 里 A **只有一条**登记（未因切换产生第二条）
+    local fixture pair count
+    fixture="$(cat "$L2_ROOT/run-roundtrip.fixture" 2>/dev/null || echo "$L2_FIXTURE_ROOT/engproj-roundtrip")"
+    pair="$fixture/.rddf/state/pair.json"
+    [ -f "$pair" ] || { echo "fixture 下没有 pair.json" >&2; return 1; }
+    count="$(python3 -c '
+import json, sys
+data = json.load(open(sys.argv[1]))
+pairs = data.get("pairs") or {}
+print(len([k for k, v in pairs.items() if (v or {}).get("goal_key", {}) and (v or {}).get("goal_key", {}).get("intent") == "rt-one"]))
+' "$pair")"
+    [ "$count" = "1" ] || { echo "goal_key.intent=rt-one 的登记条目数不是 1（=$count）——A 被重建了" >&2; return 1; }
+
+    # ⑤ sessions 把两个后端列在同一 work_root 组里
+    local scalls_sessions grouped
+    scalls_sessions="$(l2_tool_calls sessions "$L2_ROOT/run-roundtrip.json")"
+    [ -n "$scalls_sessions" ] || { echo "没有 sessions 调用产物" >&2; return 1; }
+    grouped="$(printf '%s\n' "$scalls_sessions" | python3 -c '
+import json, sys
+a, b = sys.argv[1], sys.argv[2]
+for l in sys.stdin.read().splitlines():
+    if not l.strip():
+        continue
+    r = json.loads(l)
+    s = r.get("summary") or {}
+    for g in (s.get("groups") or []):
+        ids = g.get("session_ids") or []
+        if a in ids and b in ids:
+            print("yes")
+            raise SystemExit
+print("no")
+' "$a_id" "$b_id")"
+    [ "$grouped" = "yes" ] || {
+        echo "sessions 没把 A 与 B 列在同一 work_root 组（兜底路径/分组语义有问题）" >&2
+        printf '%s\n' "$scalls_sessions" >&2
+        return 1
+    }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-99：清理本次运行创建的后端（防止残留占满全局并发上限，污染后续运行）
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-99: 清理本次运行创建的后端 session" {
+    local svc="$HOME/.config/opencode/service.json"
+    if [ ! -f "$svc" ]; then
+        skip "无 service.json（取不到后台服务凭据），跳过后端清理"
+    fi
+    local pw port
+    pw="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("password",""))' "$svc" 2>/dev/null)"
+    [ -n "$pw" ] || skip "service.json 里没有 password，跳过后端清理"
+    port="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("port") or "")
+except Exception:
+    print("")
+' "$svc" 2>/dev/null)"
+    [ -n "$port" ] || port=49374
+
+    # 全库扫（cursor 续扫）→ 删掉所有 delegated_by=front-delegate 的后端
+    local ids
+    ids="$(curl -s -m 20 -u "opencode:$pw" "http://127.0.0.1:$port/api/session?limit=100" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin).get("data") or []
+except Exception:
+    data = []
+print("\n".join(s["id"] for s in data if (s.get("metadata") or {}).get("delegated_by") == "front-delegate"))
+')"
+    local sid n=0
+    for sid in $ids; do
+        curl -s -m 10 -o /dev/null -X DELETE -u "opencode:$pw" "http://127.0.0.1:$port/api/session/$sid" 2>/dev/null && n=$((n+1))
+    done
+    echo "已清理 delegated 后端 $n 个" >&2
 }
