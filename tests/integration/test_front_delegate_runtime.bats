@@ -537,6 +537,12 @@ try:
 except Exception:
     print("")
 ' "$svc" 2>/dev/null)"
+    # ⚠️ 端口**不写死**：本机的 opencode 已改为「从源码构建」（scripts/opencode-update.sh），
+    #    重启后端口会变（旧的发布版进程被换掉）⇒ 以 `opencode service status` 的实际端口为准，
+    #    否则会打到残留的旧进程上（清理不到本场景的后端 ⇒ 占满全局并发上限）。
+    if [ -z "$port" ]; then
+        port="$(opencode service status 2>/dev/null | grep -oE '127\.0\.0\.1:[0-9]+' | head -1 | cut -d: -f2)"
+    fi
     [ -n "$port" ] || port=49374
     local ids n
     ids="$(python3 -c '
