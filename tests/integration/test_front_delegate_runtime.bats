@@ -746,6 +746,22 @@ PROMPT_EOF
 把第 2 步的**完整返回**（成功或报错）如实报出来；如果被拒绝，不要重试、不要换参数。
 PROMPT_EOF
         ;;
+    cancel-force)
+        cat <<PROMPT_EOF
+只做这一件事：在同一个工程目录 ${fixture} 上按顺序做下面 4 步，**每步只做一次**，做完一步再做下一步：
+1) 用 dispatch 派发 A：project_dir=${fixture}，agent=build，task/goal 写「新建 c1.txt，内容 c1」，
+   goal_key={"intent":"cf-one"}，scope=["c1.txt"]，acceptance="文件 ${fixture}/c1.txt 存在且内容为 c1"。
+   记下 dispatch 返回的 session_id（记作 A_ID）。
+2) 用 cancel 取消 A：session_id=A_ID，**不要**传 force。
+   把这次 cancel 的**完整返回**如实报出来（成功或被拒都报，不要重试）。
+3) 用 cancel 再取消 A：session_id=A_ID，**force 传 true**。
+   把这次 cancel 的**完整返回**如实报出来。
+4) 用 dispatch 派发 B：project_dir=${fixture}，agent=build，task/goal 写「新建 c2.txt，内容 c2」，
+   goal_key={"intent":"cf-two"}，scope=["c2.txt"]，acceptance="文件 ${fixture}/c2.txt 存在且内容为 c2"。
+   把 dispatch 的完整返回报出来。
+每步只做一次，不要重试、不要换参数再试。
+PROMPT_EOF
+        ;;
     roundtrip)
         cat <<PROMPT_EOF
 只做这一件事：在同一个工程目录 ${fixture} 上完成一次**往返切换**，按顺序做下面 5 步，**每步只做一次**，做完一步再做下一步：
@@ -2114,4 +2130,129 @@ for line in open(sys.argv[1], encoding="utf-8"):
 print(c)
 ' "$ledger")"
     [ "$n" = "1" ] || { echo "dispatched 行应为 1（被拒的那次不得落行），实际 $n" >&2; return 1; }
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# L2-24：cancel 的停机证据门控 —— 拒绝 → force → 放槽 → 同一工作树可再派发
+#   （ADR-front-cancel-release：cancel 复用 suspend 的停机判据；证据不足 ⇒ 整单拒绝）
+#
+# ⚠️ **「第一次 cancel 被拒」在真实运行时不是确定性的**：上游 interrupt 被受理后清理
+#    异步 settle，后端往往在停机窗口内真的停下 ⇒ 第一次 cancel 可能**直接成功**。
+#    ⇒ 本用例断言**契约可见的不变量**（确定性的），并**如实报告**走的是哪条分支：
+#      ① 至少有一次 cancel 带了 force:true；
+#      ② 走完后 A 的台账条目是 tombstone（墓碑 ⇒ 不占槽）；
+#      ③ 随后的 dispatch（B）**成功**（槽位已释放）；
+#      ④ 同一 work_root 的占槽条目 ≤ 1（单槽不变式 ⇒ 没有两个写入者）；
+#      ⑤ 若第一次 cancel 被拒 ⇒ 它的返回里必须有 reason（新字段）且 state 不是 tombstone。
+# ═══════════════════════════════════════════════════════════════════════════
+@test "L2-24: cancel 拒绝/force → 放槽 → 同一工作树可再派发（停机证据门控）" {
+    l2_run_scenario cancel-force
+
+    local raw
+    raw="$L2_ROOT/run-cancel-force.json"
+    [ -s "$raw" ] || { echo "没有 cancel-force 场景产物" >&2; return 1; }
+
+    local parsed
+    parsed="$(python3 - "$raw" <<'PYEOF'
+import json, sys
+try:
+    raw = open(sys.argv[1], encoding="utf-8").read()
+except Exception:
+    raise SystemExit
+cancels, dispatches = [], []
+for line in raw.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get("type") != "tool_use":
+        continue
+    part = ev.get("part") or {}
+    st = part.get("state") or {}
+    inp = st.get("input") or {}
+    out = st.get("output")
+    summary = {}
+    if isinstance(out, str):
+        try:
+            summary = json.loads(out)
+        except Exception:
+            summary = {}
+    elif isinstance(out, dict):
+        summary = out
+    rec = {
+        "tool": part.get("tool"),
+        "in": inp,
+        "summary": summary,
+        "status": st.get("status"),
+        "error": st.get("error") if isinstance(st.get("error"), str) else (st.get("error") or {}).get("message"),
+    }
+    if part.get("tool") == "cancel":
+        cancels.append(rec)
+    elif part.get("tool") == "dispatch":
+        dispatches.append(rec)
+print(json.dumps({"cancels": cancels, "dispatches": dispatches}, ensure_ascii=False))
+PYEOF
+)"
+    [ -n "$parsed" ] || { echo "解析 cancel/dispatch 调用产物失败" >&2; return 1; }
+
+    # ① 至少有一次 cancel 带 force:true
+    echo "$parsed" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+forced = [c for c in d["cancels"] if (c.get("in") or {}).get("force") is True]
+print("yes" if forced else "no")
+' | grep -q yes || { echo "没有带 force:true 的 cancel 调用" >&2; echo "$parsed" | head -c 2000 >&2; return 1; }
+
+    # ② A 的台账条目最终是 tombstone
+    local fixture pair
+    fixture="$(cat "$L2_ROOT/run-cancel-force.fixture" 2>/dev/null || echo "")"
+    [ -n "$fixture" ] || { echo "没有 fixture 路径" >&2; return 1; }
+    pair="$fixture/.rddf/state/pair.json"
+    [ -f "$pair" ] || { echo "fixture 下没有 pair.json" >&2; return 1; }
+
+    # ③ 随后的 dispatch 成功 + ④ 单槽不变式（同一 work_root 占槽条目 ≤ 1）
+    PARSED="$parsed" python3 - "$pair" <<'PYEOF'
+import json, os, sys
+d = json.loads(os.environ["PARSED"])
+pair_path = sys.argv[1]
+pairs = (json.load(open(pair_path, encoding="utf-8")).get("pairs") or {})
+
+ok_dispatch = [x for x in d["dispatches"] if x.get("status") != "error" and (x.get("summary") or {}).get("session_id")]
+if len(ok_dispatch) < 2:
+    print("两次 dispatch 未都成功：%s" % json.dumps(d["dispatches"], ensure_ascii=False)[:800])
+    raise SystemExit(1)
+
+# 走完流程后：至少一个条目是 tombstone；且同一 work_root 的占槽条目 ≤ 1
+work_root = None
+for x in d["dispatches"]:
+    wr = (x.get("in") or {}).get("project_dir")
+    if wr:
+        work_root = wr
+        break
+tomb = [sid for sid, e in pairs.items() if e.get("state") == "tombstone"]
+if not tomb:
+    print("没有任何条目是 tombstone：%s" % json.dumps(pairs, ensure_ascii=False)[:800])
+    raise SystemExit(1)
+if work_root:
+    occ = [sid for sid, e in pairs.items() if e.get("work_root") == work_root and e.get("state") in ("active", "dispatching")]
+    if len(occ) > 1:
+        print("同一 work_root 的占槽条目 > 1：%s" % occ)
+        raise SystemExit(1)
+
+# ⑤ 若有被拒的 cancel（非 force），它必须带 reason（新字段）且 state 不是 tombstone
+refused = [c for c in d["cancels"]
+           if (c.get("in") or {}).get("force") is not True
+           and (c.get("summary") or {}).get("state") != "tombstone"]
+for c in refused:
+    s = c.get("summary") or {}
+    if not s.get("reason"):
+        print("被拒的 cancel 没有 reason 字段：%s" % json.dumps(s, ensure_ascii=False)[:400])
+        raise SystemExit(1)
+print("OK")
+PYEOF
+    [ "$?" -eq 0 ] || return 1
 }
