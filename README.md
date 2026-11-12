@@ -56,8 +56,35 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 | `tests/integration/test_stage_guide_cross_process_e2e.bats` | 6 | Cross-process (real subprocess.Popen + fcntl contention) for feat-guide-orchestrator-session-event-bus: fcntl concurrent writes, last_seen_offset polling, crash recovery, H7 singleton, archive-triggered reset, guide_entry persistence |
 | `tests/integration/test_guide_polling_loop_e2e.bats` | 3 | Closed polling loop for add-guide-polling-loop-implementation (v4.1): AC-G1 guide reads window-B events, AC-G2 last_seen_offset monotonic advance, AC-G3 archive-triggered offset reset + re-read |
 | `tests/_lib/test_full_workflow_fixture_*.bats` | 12 | Per-function unit tests of the E2E fixture helpers |
+| `tests/integration/test_front_delegate_runtime.bats` | 26 | **真实运行时**（`E2E_REAL_RUNTIME=1` 才跑）：front agent 驱动的委托面契约 —— 工具门控 / 真委托 / pair+role 登记 / scope 越界 / busy / 续接 / 知识 session / ledger / 权限加固 / 异步派发（dispatch·sessions·suspend·cancel）|
+| `tests/integration/test_subagent_contract_runtime.bats` | 11 | **真实运行时**（同上门控）：subagent 输入契约门 —— L3 注入 / L1 warn-vs-enforce / L2 兜底检出 / 合规放行 / 豁免三路径（任务陈述区关键词、尾部关键词不算、跨对象不继承）/ 续接轮 / 逐 agent 覆盖 / off / 审计 CLI |
 
-Total: **45 cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implementation).
+Total: **45 in-process cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implementation).
+
+**Plus 37 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
+
+```bash
+E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-sc" bats tests/integration/test_subagent_contract_runtime.bats
+E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-l2" bats tests/integration/test_front_delegate_runtime.bats
+```
+
+### subagent 输入契约运行时测试（`test_subagent_contract_runtime.bats`）
+
+被测对象是 **`~/.config/opencode`**（用户配置仓）里的 subagent 输入契约门，不是 rdd-workflow 的 Python 侧：
+`plugins/subagent-contract.ts`（L3 注入 / L1 硬门 / L2 检出）、`lib/subagent-contract-core.ts`（规则真源与豁免语义）、
+`scripts/audit-subagent-prompts.ts`（审计 CLI）。默认从 `$HOME/.config/opencode` 读，可用 `SC_SRC=<path>` 覆盖。
+
+隔离方式是 **hermetic HOME**：`HOME` 指到 `.tmp-sc/home` ⇒ 契约配置、契约日志、会话 DB 全部隔离；配置目录用
+**符号链接农场**指向真实安装态（只有 `subagent-contract.json` 是真文件）⇒ 测的是真实插件，但任何配置写入都落在临时副本里。
+凭据 `auth.json` / `account.json` 用链接带过来（否则 provider 401）。
+
+断言只取**结构性事实**：契约日志（`gate`/`level`/`mode`/`exempted`/`violations`）、NDJSON 里 `subagent` 工具调用的
+`status`（completed / error）与错误文案、隔离 DB 里子会话是否被创建 —— 不断言模型措辞。
+
+⚠️ 每个用例都会真实调用模型（父会话 build + 可能的子会话 critic）。父模型默认**按候选顺序自动挑一个当前有额度的**
+（`commandcode → opencode-go → minimax-cn`，可用 `SC_PARENT_MODEL=...` 指定、`SC_PARENT_MODEL_CANDIDATES=...` 改候选），
+额度全满时整文件 skip；默认 `SC_CASE_TIMEOUT=180s`，provider 报 rate-limit 或父会话超时且无任何工具调用时**单例 skip**；
+`opencode run --standalone` 会留下 `serve` / `pty` 守护进程，setup/teardown 会按 `OPENCODE_DB` 前缀精确清理。
 
 ## Architecture
 
@@ -72,6 +99,7 @@ Total: **45 cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implem
 │                              │  │  (10 invoke_* functions, real API) │  │
 │                              │  └─ integration/                     │  │
 │                              │     ├─ test_full_workflow_e2e.bats   │  │
+│                              │     ├─ test_subagent_contract_runtime│  │
 │                              │     ├─ test_rddf_cli_all_subcommands │  │
 │                              │     ├─ test_install_global.bats     │  │
 │                              │     └─ test_external_project_smoke   │  │
