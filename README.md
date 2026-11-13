@@ -58,15 +58,21 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 | `tests/_lib/test_full_workflow_fixture_*.bats` | 12 | Per-function unit tests of the E2E fixture helpers |
 | `tests/integration/test_front_delegate_runtime.bats` | 26 | **真实运行时**（`E2E_REAL_RUNTIME=1` 才跑）：front agent 驱动的委托面契约 —— 工具门控 / 真委托 / pair+role 登记 / scope 越界 / busy / 续接 / 知识 session / ledger / 权限加固 / 异步派发（dispatch·sessions·suspend·cancel）|
 | `tests/integration/test_subagent_contract_runtime.bats` | 11 | **真实运行时**（同上门控）：subagent 输入契约门 —— L3 注入 / L1 warn-vs-enforce / L2 兜底检出 / 合规放行 / 豁免三路径（任务陈述区关键词、尾部关键词不算、跨对象不继承）/ 续接轮 / 逐 agent 覆盖 / off / 审计 CLI |
+| `tests/integration/test_role_class_runtime.bats` | 4 | **真实运行时**（同上门控）：派发能力类 `role_class` 的类边界 —— builder 窄目标被拒（不建 session）/ builder 宽目标下 arch 路径权限 deny + 交回凭据 / `rddf` 不可用时文本兜底不新造落点 / architect 类的审查者不可用时不得自审自批（ADR 保持 Draft）|
 
 Total: **45 in-process cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implementation).
 
-**Plus 37 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
+**Plus 41 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11 + `test_role_class_runtime.bats` 4) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
 
 ```bash
 E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-sc" bats tests/integration/test_subagent_contract_runtime.bats
 E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-l2" bats tests/integration/test_front_delegate_runtime.bats
+E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-l2" bats tests/integration/test_role_class_runtime.bats
 ```
+
+`test_role_class_runtime.bats` 的 fixture 落在仓库外的 `/workspace/main/rdd-workflow-e2e-rc`（可用 `RC_FIXTURE_ROOT` 覆盖）——
+plan agent 的 `external_directory` 只放行 `/workspace/**`，且 fixture 落在仓库内会被 plan 读到本仓的
+`.rddf/state/pair.json` 而误判 busy。
 
 ### subagent 输入契约运行时测试（`test_subagent_contract_runtime.bats`）
 
