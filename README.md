@@ -30,7 +30,7 @@ Catches regressions that in-process tests miss:
 ./install_testbed.sh --status    # show current state
 
 # 2. Run all 36 tests
-RDD_WORKFLOW_REPO="$HOME/.agents/skills/rdd-workflow" bats tests/
+RDD_WORKFLOW_REPO="$HOME/.agents/skills/rdd-workflow" bats -r tests/
 
 # Or single file:
 RDD_WORKFLOW_REPO=~/.agents/skills/rdd-workflow bats tests/integration/test_full_workflow_e2e.bats
@@ -45,7 +45,7 @@ This repo's `.github/workflows/test.yml` runs on:
 - **workflow_dispatch** (manual trigger from Actions tab)
 - **schedule** — nightly cron at 02:00 UTC, catches upstream rdd-workflow regressions within 24h
 
-Each CI run executes `./install_testbed.sh --clone` (fresh install from latest rdd-workflow master) then `bats tests/`.
+Each CI run executes `./install_testbed.sh --clone` (fresh install from latest rdd-workflow master) then `bats -r tests/`（bats 默认**不递归**子目录；漏 `-r` 会跑出 `1..0`）。
 
 ## Test suite breakdown (42 cases, ~20s)| File | Cases | What it validates |
 |------|------:|-------------------|
