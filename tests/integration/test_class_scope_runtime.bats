@@ -28,6 +28,9 @@
 #   CS-4（AC2 前提，subagent-contract-critic-enforce）审计 CLI 的 `--json` 输出含
 #               `rows[].timeCreated` / `messageIndex` / `evaluation{ok,exempted}`
 #               ⇒ 四元组可算（**纯 CLI，不需模型**，但随 runtime 门控一起跑以免污染默认套件）。
+#   CS-5（失败签名分类）修改文件上的测试失败 ⇒ `ac-fail` 而非 `blocked`。
+#               ⚠ **验证状态：未验证**（2026-11-14 两次尝试均撞 Token Plan 429：10 次 retry 后
+#               error、0 条文本、fixture 未被改 ⇒ 会话没拿到模型响应）。额度恢复后首次跑通即可。
 #
 # ── 断言优先级 ─────────────────────────────────────────────────────────────
 #   ① 文件系统事实（文件是否存在 / 内容）
@@ -215,4 +218,28 @@ for key in ("timeCreated", "messageIndex", "evaluation"):
 ev = r["evaluation"]
 assert "ok" in ev and "exempted" in ev, "evaluation 缺 ok/exempted"
 PY
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# CS-5：修改文件上的测试失败 ⇒ 判据信号（ac-fail），不是取证不可用（blocked）
+#   —— 防 oracle BLOCK 的根因复发：基线臂对「被修改文件的执行类取证」不可执行，
+#      若不按失败签名分类，真 bug 会被路由成交回（白烧 3 轮额度）。
+# ══════════════════════════════════════════════════════════════════════════
+@test "CS-5（AC1 失败签名分类）修改文件上的测试失败 ⇒ ac-fail 而非 blocked" {
+    local proj; proj="$(cs_fixture cs5)"
+    # fixture 里放一个**会被本次改动弄坏**的测试：断言 x === 2，而 src/app.ts 是 x = 1
+    mkdir -p "$proj/tests"
+    printf 'import { expect, test } from "bun:test"\nimport { x } from "../src/app"\ntest("x is 2", () => { expect(x).toBe(2) })\n' \
+        > "$proj/tests/app.test.ts"
+    git -C "$proj" add -A && git -C "$proj" commit -q -m "add failing test"
+    # 让后端**改坏** src/app.ts（x = 1 → 3），从而该测试失败
+    cs_plan_run cs5 \
+        "$(cs_prompt "$proj" \
+            "请把 src/app.ts 里的 x = 1 改成 x = 3，然后运行 \`bun test tests/app.test.ts\` 并据实给出验收结论。该测试预期会失败（它断言 x === 2）：若它失败，请交回主会话说明这是**判据不通过**（不是取证不可用），并在 ⑤ 里写明建议的下一步。" \
+            '[".rddf/reviews", ".rddf/state/verifier"]' \
+            "改坏一个值并如实报告测试失败")" "$proj" || true
+    # ① 测试确实失败（真 bug 存在）
+    ( cd "$proj" && bun test tests/app.test.ts >/dev/null 2>&1 ) && return 1
+    # ② 分类为 ac-fail（不是 blocked）：凭据 / 交回文本里出现 ac-fail 语义
+    grep -qE "HANDOFF:[[:space:]]*ac-fail" "$CS_ROOT/cs5.json"
 }
