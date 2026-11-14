@@ -33,6 +33,9 @@
 #                按契约不能改 `src/**` ⇒ 「被修改的文件」从未成立。现改为：fixture 初始**绿**，
 #                由**harness**（本文件，不是被派发后端）改坏源码 ⇒ 后端面对的是「文件相对 HEAD
 #                已被改动 + 测试断言失败」⇒ 必须分类为判据信号（ac-fail），不得走基线对照/交回。）
+#   CS-6（收拢后落盘）verifier 类写 `.rddf/state/verifier/` 下的 verdict cache + audit log
+#               ⇒ **落盘成功**（不再需要「主会话代跑状态机」的过渡期绕路；产品侧 change
+#                `consolidate-verifier-state` 已把 4 个根下点文件收拢进该目录）。
 #
 # ── 断言优先级 ─────────────────────────────────────────────────────────────
 #   ① 文件系统事实（文件是否存在 / 内容）
@@ -220,6 +223,44 @@ for key in ("timeCreated", "messageIndex", "evaluation"):
 ev = r["evaluation"]
 assert "ok" in ev and "exempted" in ev, "evaluation 缺 ok/exempted"
 PY
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# CS-6：收拢后的状态文件**落盘成功**（不再是「交回主会话代跑」）
+#   —— 产品侧 change `consolidate-verifier-state`（2026-11-14）把 4 个根下点文件收拢进
+#      `.rddf/state/verifier/` ⇒ verifier 类的允许集覆盖 skill 的**全部**状态文件
+#      ⇒ 过渡期「主会话代跑状态机」退役 ⇒ 后端**自己**写成功。
+# ══════════════════════════════════════════════════════════════════════════
+@test "CS-6（收拢后落盘）verifier 类写 .rddf/state/verifier/ 下的 verdict cache + audit log ⇒ 不被权限拒" {
+    local proj; proj="$(cs_fixture cs6)"
+    cs_plan_run cs6 \
+        "$(cs_prompt "$proj" \
+            "请做两件事并如实报告：(1) 在 .rddf/state/verifier/.ac-verdict-demo.json 写入 {\"change\":\"demo\",\"verdict\":[]}；(2) 在 .rddf/state/verifier/.ac-verification.jsonl 追加一行 {\"ts\":\"2026-11-14T00:00:00Z\",\"change_name\":\"demo\"}。若某一步被权限拒绝，原样报告被拒的操作与路径。" \
+            '[".rddf/reviews", ".rddf/state/verifier"]' \
+            "写收拢后的 verifier 状态文件（不被权限拒）")" "$proj" || true
+    # ① verdict cache **真的落盘了**（收拢后的路径）
+    [ -f "$proj/.rddf/state/verifier/.ac-verdict-demo.json" ]
+    grep -q '"demo"' "$proj/.rddf/state/verifier/.ac-verdict-demo.json"
+    # ② audit log **真的落盘了**
+    [ -f "$proj/.rddf/state/verifier/.ac-verification.jsonl" ]
+    grep -q '"demo"' "$proj/.rddf/state/verifier/.ac-verification.jsonl"
+    # ③ **结构化**证据：delegate 工具层无错误 + ledger 无 blocked_reason
+    #    ⚠ 不断言模型措辞：首版用 `! grep "Permission denied" 整份 JSON` ⇒ 命中模型自述
+    #      「没有出现 Permission denied」⇒ **假阳性**（与 CS-5 首版同类错误）
+    python3 - "$CS_ROOT/cs6.json" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip().startswith("{")]
+errs = []
+for r in rows:
+    part = r.get("part") or {}
+    if part.get("type") != "tool":
+        continue
+    st = part.get("state") or {}
+    if st.get("status") == "error" or st.get("error"):
+        errs.append(f"{part.get('tool')}: {st.get('error')}")
+assert not errs, f"工具层报错: {errs}"
+PY
+    ! cs_ledger_field "$proj" blocked_reason | grep -qi "Permission denied"
 }
 
 # ══════════════════════════════════════════════════════════════════════════
