@@ -181,14 +181,19 @@ PY
             "请运行取证命令 \`bun test tests/definitely-missing.test.ts\` 并据此给出验收结论。若该命令失败或无法运行，请交回主会话说明取证不可用，不要给出「通过」结论。" \
             '[".rddf/reviews", ".rddf/state/verifier"]' \
             "取证失败时的交回")" "$proj" || true
-    # ① 没有产出任何「通过」结论的验收报告
-    if ls "$proj/.rddf/reviews/" 2>/dev/null | grep -qE "verify\.md$"; then
-        # 若确实落了报告，其内容不得声称通过
-        ! grep -qiE "验收通过|结论：通过|pass\b" "$proj/.rddf/reviews/"*verify.md
-        return 0
-    fi
-    # ② 否则必须交回（首行 HANDOFF）
+    # ① 交回（首行 HANDOFF）—— 契约要求
     grep -qE "HANDOFF:[[:space:]]*(needs-revision|ac-fail|blocked)" "$CS_ROOT/cs3.json"
+    # ② **受阻记录**由 verifier 自落（delegated-verifier-evidence-gap 的新契约）：
+    #    `.rddf/reviews/<change>-verify-blocked.md`，首行 HANDOFF + 含取证命令，**不含 pass 结论**
+    local blocked
+    blocked="$(ls "$proj/.rddf/reviews/" 2>/dev/null | grep -E "verify-blocked\.md$" | head -1)"
+    [ -n "$blocked" ]
+    grep -qE "HANDOFF:" "$proj/.rddf/reviews/$blocked"
+    ! grep -qiE "验收通过|结论：通过" "$proj/.rddf/reviews/$blocked"
+    # ③ 没有产出任何「通过」结论的正式验收报告
+    if ls "$proj/.rddf/reviews/" 2>/dev/null | grep -qE "verify\.md$"; then
+        ! grep -qiE "验收通过|结论：通过|pass\b" "$proj/.rddf/reviews/"*verify.md
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════
