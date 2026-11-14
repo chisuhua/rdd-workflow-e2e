@@ -28,9 +28,11 @@
 #   CS-4（AC2 前提，subagent-contract-critic-enforce）审计 CLI 的 `--json` 输出含
 #               `rows[].timeCreated` / `messageIndex` / `evaluation{ok,exempted}`
 #               ⇒ 四元组可算（**纯 CLI，不需模型**，但随 runtime 门控一起跑以免污染默认套件）。
-#   CS-5（失败签名分类）修改文件上的测试失败 ⇒ `ac-fail` 而非 `blocked`。
-#               ⚠ **验证状态：未验证**（2026-11-14 两次尝试均撞 Token Plan 429：10 次 retry 后
-#               error、0 条文本、fixture 未被改 ⇒ 会话没拿到模型响应）。额度恢复后首次跑通即可。
+#   CS-5（失败签名分类）**被修改文件**上的测试失败 ⇒ `ac-fail` 而非 `blocked`。
+#               （2026-11-14 验证通过。首版断言空转：fixture 初始就失败、且被派发的 verifier
+#                按契约不能改 `src/**` ⇒ 「被修改的文件」从未成立。现改为：fixture 初始**绿**，
+#                由**harness**（本文件，不是被派发后端）改坏源码 ⇒ 后端面对的是「文件相对 HEAD
+#                已被改动 + 测试断言失败」⇒ 必须分类为判据信号（ac-fail），不得走基线对照/交回。）
 #
 # ── 断言优先级 ─────────────────────────────────────────────────────────────
 #   ① 文件系统事实（文件是否存在 / 内容）
@@ -225,21 +227,40 @@ PY
 #   —— 防 oracle BLOCK 的根因复发：基线臂对「被修改文件的执行类取证」不可执行，
 #      若不按失败签名分类，真 bug 会被路由成交回（白烧 3 轮额度）。
 # ══════════════════════════════════════════════════════════════════════════
-@test "CS-5（AC1 失败签名分类）修改文件上的测试失败 ⇒ ac-fail 而非 blocked" {
+@test "CS-5（AC1 失败签名分类）被修改文件上的测试失败 ⇒ ac-fail 而非 blocked" {
     local proj; proj="$(cs_fixture cs5)"
-    # fixture 里放一个**会被本次改动弄坏**的测试：断言 x === 2，而 src/app.ts 是 x = 1
+    # ── ① 初始状态：测试**通过**（x = 2）────────────────────────────────────
+    #    这样「改动导致失败」才是可判定的（首版 fixture 初始就是 x = 1 ⇒ 断言空转）
+    printf 'export const x = 2\n' > "$proj/src/app.ts"
     mkdir -p "$proj/tests"
     printf 'import { expect, test } from "bun:test"\nimport { x } from "../src/app"\ntest("x is 2", () => { expect(x).toBe(2) })\n' \
         > "$proj/tests/app.test.ts"
-    git -C "$proj" add -A && git -C "$proj" commit -q -m "add failing test"
-    # 让后端**改坏** src/app.ts（x = 1 → 3），从而该测试失败
+    git -C "$proj" add -A && git -C "$proj" commit -q -m "green fixture"
+    ( cd "$proj" && bun test tests/app.test.ts >/dev/null 2>&1 ) || {
+        echo "前置不成立：fixture 初始测试应当通过" >&2
+        return 1
+    }
+    # ── ② 由 **harness**（不是被派发后端）改坏源码 ⇒ 「被修改的文件」成立 ──
+    #    后端是 role_class=verifier，按角色契约不得改 src/** ⇒ 由 harness 制造这个前提
+    printf 'export const x = 3\n' > "$proj/src/app.ts"
+    ( cd "$proj" && bun test tests/app.test.ts >/dev/null 2>&1 ) && {
+        echo "前置不成立：改坏后测试应当失败" >&2
+        return 1
+    }
+    # ── ③ 派发 verifier 后端：它看到的正是「被修改文件 + 断言失败」────────────
     cs_plan_run cs5 \
         "$(cs_prompt "$proj" \
-            "请把 src/app.ts 里的 x = 1 改成 x = 3，然后运行 \`bun test tests/app.test.ts\` 并据实给出验收结论。该测试预期会失败（它断言 x === 2）：若它失败，请交回主会话说明这是**判据不通过**（不是取证不可用），并在 ⑤ 里写明建议的下一步。" \
+            "请运行 \`bun test tests/app.test.ts\` 并据实给出验收结论。该测试断言 x === 2，而 src/app.ts 现在是 x = 3（**该文件相对 HEAD 已被改动**），因此它会失败。这是**判据不通过**（不是取证不可用）：请交回主会话并按 ac-fail 归类，在 ⑤ 里写明建议的下一步。" \
             '[".rddf/reviews", ".rddf/state/verifier"]' \
-            "改坏一个值并如实报告测试失败")" "$proj" || true
-    # ① 测试确实失败（真 bug 存在）
-    ( cd "$proj" && bun test tests/app.test.ts >/dev/null 2>&1 ) && return 1
-    # ② 分类为 ac-fail（不是 blocked）：凭据 / 交回文本里出现 ac-fail 语义
+            "面对被修改文件上的测试失败，如实归类")" "$proj" || true
+    # ① 失败签名 = **判据信号**（断言不匹配），不是环境信号（runner 缺失 / 0 用例）
+    local runout="$CS_ROOT/cs5.bun.out"
+    ( cd "$proj" && bun test tests/app.test.ts ) >"$runout" 2>&1 || true
+    grep -qE "Expected|Received" "$runout"          # 断言不匹配的签名
+    ! grep -qE "command not found|Cannot find module" "$runout"
+    # ② 分类为 ac-fail（不是 blocked）—— HANDOFF 首行是**契约**，可断言
     grep -qE "HANDOFF:[[:space:]]*ac-fail" "$CS_ROOT/cs5.json"
+    ! grep -qE "HANDOFF:[[:space:]]*blocked" "$CS_ROOT/cs5.json"
+    # ③ 后端**没有**改动源码（verifier 不得改实现）⇒ 仍是 harness 的 x = 3
+    grep -q "export const x = 3" "$proj/src/app.ts"
 }
