@@ -111,9 +111,15 @@ cs_plan_run() {
     return $rc
 }
 
-# 委托指令：只派发、不自行实现
+# 委托指令：只派发、不自行实现（role_class 可选，默认 verifier）
 cs_prompt() {
     local project="$1" task="$2" scope="$3" goal="$4"
+    cs_prompt_rc "$project" "$task" "$scope" "$goal" "verifier"
+}
+
+# 同上，但 role_class 可指定（CS-7 需要 builder ⇒ engineering kind ⇒ 才会走 no_work_evidence 判定）
+cs_prompt_rc() {
+    local project="$1" task="$2" scope="$3" goal="$4" role_class="$5"
     cat <<EOF
 请只做一件事：调用 **delegate** 工具派发一个工程后端，参数严格如下（不要改写、不要追加、不要自行实现）：
 - project_dir: $project
@@ -122,7 +128,7 @@ cs_prompt() {
 - goal: $goal
 - scope: $scope
 - acceptance: 完成后报告实际做了什么
-- role_class: verifier
+- role_class: $role_class
 - plan_ref: $project/.rddf/improvements/demo-change.md
 派发完成后，把 delegate 的返回值原样贴出（尤其 outcome / blocked_reason / changed_files）。
 若 delegate 被拒，把错误原文贴出，不要改用 subagent 绕过，也不要重试。
@@ -304,4 +310,81 @@ PY
     ! grep -qE "HANDOFF:[[:space:]]*blocked" "$CS_ROOT/cs5.json"
     # ③ 后端**没有**改动源码（verifier 不得改实现）⇒ 仍是 harness 的 x = 3
     grep -q "export const x = 3" "$proj/src/app.ts"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# CS-7（端到端行为）：「宿主说成功但无交付证据」⇒ 插件降级 unverified
+#      ⇒ 派发方**必须**按纪律转述为「没有可验证的交付证据」，**不得**说已完成。
+#
+#   这是**行为层**的测试（真派一个 session），与 opencode 仓的静态守卫互补：
+#   静态守卫保证「契约不漂移 / prompt 不落后」；本例保证「运行时的分类与转述纪律真的成立」。
+#
+#   触发条件（插件侧，`lib/delegate-core.ts`）：
+#     kind=engineering ∧ outcome=succeeded ∧ 本轮无写盘调用 ∧ 无产物
+#       ⇒ no_work_evidence=true ⇒ outcome 降级为 unverified（host_outcome 保留 succeeded）
+#   ⇒ 本例派 **role_class=builder**（写集 = scope），并让后端**只回答、不落盘**。
+#   ⚠ **kind 由 agent 决定**（agent=build ⇒ engineering），role_class 只管写集 —— 两者正交。
+
+# 取 delegate 工具的**结构化返回**（插件产出的 summary JSON）—— 不断言模型措辞
+cs_delegate_result() {
+    python3 - "$1" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip().startswith("{")]
+for r in rows:
+    part = r.get("part") or {}
+    if part.get("type") != "tool" or part.get("tool") != "delegate":
+        continue
+    st = part.get("state") or {}
+    out = st.get("output")
+    if isinstance(out, str) and out.strip().startswith("{"):
+        print(out)
+        break
+else:
+    raise SystemExit(1)
+PY
+}
+
+# 取派发方（plan session）的最终文本
+cs_final_text() {
+    python3 - "$1" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip().startswith("{")]
+texts = [(r.get("part") or {}).get("text") or "" for r in rows
+         if (r.get("part") or {}).get("type") == "text"]
+print(texts[-1] if texts else "")
+PY
+}
+
+@test "CS-7（端到端行为）宿主说成功但无交付证据 ⇒ outcome 降级 unverified ⇒ 派发方不得转述为已完成" {
+    local proj; proj="$(cs_fixture cs7)"
+    # 派一个 **role_class=builder** 的后端，让它**只回答、不落盘**
+    # ⇒ 插件判定 no_work_evidence ⇒ outcome 降级为 unverified（host_outcome 仍是 succeeded）
+    cs_plan_run cs7 \
+        "$(cs_prompt_rc "$proj" \
+            "请读 src/app.ts 并告诉我 x 的值。**不要修改、不要创建、不要写任何文件**（不要写报告、不要写产物）；读完直接回答即可。" \
+            '["src"]' \
+            "只读回答，不落盘" \
+            "builder")" "$proj" || true
+
+    local res
+    res="$(cs_delegate_result "$CS_ROOT/cs7.json")" || {
+        echo "未取到 delegate 的结构化返回" >&2
+        return 1
+    }
+
+    # ① **结构化事实**：宿主说成功，但无写盘调用、无产物 ⇒ 降级
+    echo "$res" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["kind"] == "engineering", d["kind"]
+assert d["host_outcome"] == "succeeded", d["host_outcome"]
+assert d["no_work_evidence"] is True, d["no_work_evidence"]
+assert d["outcome"] == "unverified", d["outcome"]
+assert d["write_tool_calls"] == 0, d["write_tool_calls"]
+assert d["artifacts"] == 0, d["artifacts"]
+'
+    # ② **行为**：派发方必须按 prompt 的纪律转述 —— 出现规定的措辞，且**不得**声称「已完成」
+    local final; final="$(cs_final_text "$CS_ROOT/cs7.json")"
+    echo "$final" | grep -q "没有可验证的交付证据"
+    ! echo "$final" | grep -q "已完成"
 }

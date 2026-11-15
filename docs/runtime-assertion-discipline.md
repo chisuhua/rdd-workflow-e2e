@@ -32,6 +32,11 @@
 > | CS-6 | 同上 | 同上 |
 >
 > ⇒ 正确写法：**只查工具层 `state.error` 是否为空 + ledger 的 `blocked_reason` 是否含拒绝**。
+>
+> ⚠ **一条边界（CS-7 立的）**：断言**模型措辞**并非绝对禁止 —— 当 prompt **规定了具体措辞**
+> （如「必须转述为『没有可验证的交付证据』」）时，断言那个**规定短语**是**契约检查**
+> （不是自由措辞检查）：它验证的是「agent 照 prompt 说的做了」。CS-7 即用此法断言派发方
+> **没有**把 `unverified` 说成「已完成」。
 
 ### 纪律 2 —— 断言必须**可证伪**：前提本身要被验证
 
@@ -69,6 +74,7 @@
 | **CS-4** | 审计 CLI 的 `--json` 含 `timeCreated` / `messageIndex` / `evaluation{ok,exempted}` ⇒ 四元组可算 | **纯 CLI**（不需模型） |
 | **CS-5** | **被修改文件**上的测试失败 ⇒ 分类为 `ac-fail`（**判据信号**）而非 `blocked`（取证不可用） | 真实运行时 + 一次真实测试运行 |
 | **CS-6** | 收拢后：verifier 类写 `.rddf/state/verifier/` 下的 verdict cache + audit log ⇒ **落盘成功**、无权限拒 | 真实运行时 |
+| **CS-7** | **端到端行为**：宿主说成功但本轮无写盘调用、无产物 ⇒ 插件把 `outcome` 降级为 `unverified`（`host_outcome` 保留 `succeeded`）⇒ 派发方**必须**转述为「没有可验证的交付证据」且**不得**说「已完成」 | 真实运行时（派一个只读回答的后端） |
 
 > **CS-5 的判据形态**：失败签名必须是**判据信号**（bun 输出含 `Expected`/`Received`，不含
 > `command not found`/`Cannot find module` 这类**环境信号**）⇒ 分类 `ac-fail`；且输出**不含**
