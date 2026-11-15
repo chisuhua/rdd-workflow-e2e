@@ -177,6 +177,14 @@ RDD_WORKFLOW_REPO="$HOME/.agents/skills/rdd-workflow" bats tests/
 The `--symlink` mode means edits to `chisuhua/rdd-workflow/_lib/...` are picked up
 immediately without re-installing.
 
+## Docs
+
+| Doc | What it covers |
+|---|---|
+| [`docs/runtime-assertion-discipline.md`](docs/runtime-assertion-discipline.md) | **写运行时用例的纪律**（断言只认事实与结构化字段；前提要可证伪；每条用例配变红演练）+ CS-1..CS-6 索引 |
+| [`docs/real-runtime-prereqs.md`](docs/real-runtime-prereqs.md) | L2 运行时落地的前置探针结论与实跑结果 |
+| [`docs/known-gaps-and-ownership.md`](docs/known-gaps-and-ownership.md) | 跨仓缺口归属表（只记录，不改 opencode 仓） |
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
