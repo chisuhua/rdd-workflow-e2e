@@ -395,3 +395,140 @@ PY
 
     [ -n "$out_head" ] || { echo "⚠ state.output 为空 ⇒ 载体退 B（见报告）"; }
 }
+
+# ══════════════════════════════════════════════════════════════════════════
+# 载体 A 的落地细节（**探针实测 2026-11-16**）：
+#   `part.state.output` 是 `<subagent sessionID="…" state="completed">正文</subagent>` 包装 ⇒
+#   ① 必须 **unwrap** 再断言；② 判定行正则需要 **多行匹配**（整串以 `<subagent …>` 开头，
+#   单行锚 `^判定:` 永远不命中）。
+# ══════════════════════════════════════════════════════════════════════════
+
+# 把每次 `agent=oracle` 调用的**完整 output（已 unwrap）**写成 `$prefix.call<N>.txt`
+oig_dump_outputs() {
+    python3 - "$1" "$2" <<'PY'
+import json, re, sys
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+prefix = sys.argv[2]
+idx = 0
+for line in raw.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get("type") != "tool_use":
+        continue
+    part = ev.get("part") or {}
+    if part.get("tool") != "subagent":
+        continue
+    st = part.get("state") or {}
+    if (st.get("input") or {}).get("agent") != "oracle":
+        continue
+    idx += 1
+    out = st.get("output") or ""
+    if not isinstance(out, str):
+        out = json.dumps(out, ensure_ascii=False)
+    m = re.search(r"<subagent\b[^>]*>(.*)</subagent>", out, re.S)
+    body = m.group(1) if m else out
+    path = f"{prefix}.call{idx}.txt"
+    open(path, "w", encoding="utf-8").write(body)
+    print(f"{path}\tstatus={st.get('status')}\tlen={len(body)}")
+PY
+}
+
+# 判定行是否出现（**多行**匹配；正则从真源派生）。exit 0 = 有，1 = 无，2 = 派生失败
+oig_has_verdict() {
+    local text_file="$1" pat
+    pat="$(oig_verdict_pattern)" || return 2
+    python3 - "$text_file" "$pat" <<'PY'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+sys.exit(0 if re.search(sys.argv[2], s, re.M) else 1)
+PY
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC5 E-B 两态差分（**观察项：不 fail** —— 用户裁决；design D3）
+#   态① 带意图陈述 / 态② = **harness** 删掉意图段（不是让模型删）
+#   判据 = **两态是否可分辨**（① 有判定行、② 无）：
+#     可分辨   ⇒ 闸门生效；
+#     不可分辨 ⇒ 记「软约束被违反 / 失效」并**如实登记**（模型的真相，不是测试缺陷）。
+#   ⚠ 一次父会话里发起**两次** subagent 调用（省一次父会话轮次；SC-10 有同类先例）。
+# ══════════════════════════════════════════════════════════════════════════
+@test "AC5 E-B 两态差分（观察项，不 fail）：带意图 vs 删意图 ⇒ 判定行是否可分辨" {
+    oig_require_runtime
+    [ "$OIG_CARRIER" = "A" ] || skip "OIG_CARRIER=$OIG_CARRIER：E-B 需 state.output 载体（先跑 AC1 探针，design D2）"
+
+    local proj sid
+    proj="$(oig_fixture eb)"
+    sid="$(oig_new_session)"
+    oig_report_init
+
+    # 态① / 态② —— **只差意图那一行**（harness 侧构造，可复现）
+    local p1 p2
+    p1='请以审查模式审查 docs/adr/ADR-001.md 这个决策。
+意图陈述：要解决的问题是读接口 p95 延迟偏高；范围边界是只动读路径、不动写路径。
+判据：与既有 ADR 是否冲突。'
+    p2='请以审查模式审查 docs/adr/ADR-001.md 这个决策。
+判据：与既有 ADR 是否冲突。'
+
+    local prompt="只做一件事，按顺序发起两次 subagent 工具调用，不要做别的。
+第 1 次：agent 必须是 oracle，description 填 oig-eb-with-intent，prompt 参数必须逐字是：
+---
+$p1
+---
+第 2 次：agent 必须是 oracle，description 填 oig-eb-no-intent，prompt 参数必须逐字是：
+---
+$p2
+---"
+    oig_run_parent eb "$proj" "$prompt" "$sid"
+
+    local dumped
+    dumped="$(oig_dump_outputs "$OIG_ROOT/eb.json" "$OIG_ROOT/eb")"
+    local n
+    n="$(printf '%s\n' "$dumped" | grep -c . || true)"
+    [ "$n" -ge 2 ] || { echo "❌ 只解析到 $n 次 oracle 调用（期望 2）：$dumped" >&2; return 1; }
+
+    # 状态门控（D7）：任一次未完成 ⇒ skip 未判定
+    if printf '%s\n' "$dumped" | grep -v 'status=completed' >/dev/null; then
+        skip "存在未完成的 oracle 调用（本用例未判定）：$dumped"
+    fi
+
+    local f1="$OIG_ROOT/eb.call1.txt" f2="$OIG_ROOT/eb.call2.txt"
+    local h1=1 h2=1
+    oig_has_verdict "$f1" && h1=0
+    oig_has_verdict "$f2" && h2=0
+
+    local verdict
+    if [ "$h1" -eq 0 ] && [ "$h2" -ne 0 ]; then
+        verdict="可分辨（①有判定行 / ②无 ⇒ 闸门生效）"
+    elif [ "$h1" -ne 0 ] && [ "$h2" -ne 0 ]; then
+        verdict="不可分辨（两态都无判定行 ⇒ 可能一律拒发，需人工判读）"
+    elif [ "$h1" -eq 0 ] && [ "$h2" -eq 0 ]; then
+        verdict="**两态不可分辨**（都有判定行）—— ⚠ 存在**未排除的替代解释**：产物本身可能内嵌意图线索（见报告 caveat），故不得直接判「软约束被违反」"
+    else
+        verdict="不可分辨（①无 ②有 ⇒ 反直觉）"
+    fi
+
+    echo "── E-B 两态差分 ──"
+    echo "态①（带意图）: $( [ "$h1" -eq 0 ] && echo 有判定行 || echo 无判定行 )"
+    echo "态②（删意图）: $( [ "$h2" -eq 0 ] && echo 有判定行 || echo 无判定行 )"
+    echo "结论: $verdict"
+    echo "（态②正文前 200 字符：$(head -c 200 "$f2" | tr '\n' ' ')）"
+
+    {
+        echo ""
+        echo "### AC5 E-B 两态差分（$(date -u +%Y-%m-%dT%H:%M:%SZ)）"
+        echo ""
+        echo "- 态①（带意图）：$( [ "$h1" -eq 0 ] && echo '**有**判定行' || echo '无判定行' ) —— \`$f1\`"
+        echo "- 态②（harness 删意图）：$( [ "$h2" -eq 0 ] && echo '**有**判定行' || echo '无判定行' ) —— \`$f2\`"
+        echo "- **结论：$verdict**"
+        echo "- ⚠ 观察项，**不 fail**（用户裁决）：不合规是**模型的真相**，升级为硬门禁须另立 change"
+        echo "- ⚠ 本用例走**父会话 wrapper** ⇒ 多带一个「父模型转述」变量（已知边界）"
+    } >> "$OIG_REPORT"
+
+    oig_report_row "AC5 E-B" "${OIG_MODEL:-default}" "state1+state2" "1" "2" "$verdict" "$OIG_ROOT/eb.json"
+    # **不 fail**：观察项（用户裁决）。
+}
