@@ -1,0 +1,397 @@
+#!/usr/bin/env bash
+# tests/integration/test_oracle_intent_gate.bats — 「oracle 意图闸门」的**行为层可观测性与取证**
+#
+# 背景（2026-11-16）：
+#   v2.37 给 architect 审查链加了「oracle 调用前的意图检查点」，v2.38 补了**静态**守卫。
+#   但静态判据只证明「文档写了」，证明不了「父模型真的把意图陈述带进 oracle 的输入」
+#   「oracle 真的会因意图未定而拒发判定行」—— 本文件补这一层。
+#
+# 立项：`~/.config/opencode/openspec/changes/oracle-intent-gate-e2e/`
+#   proposal AC1–AC8 / design D1–D10（**本文件只实现 PR-1**：AC1 探针 + AC6 门控 + AC8 报告 + AC7-①）
+#
+# 门控：
+#   E2E_REAL_RUNTIME 未设置 → 全部用例 skip，bats 退出码 0（默认态，不进 CI）。
+#   E2E_REAL_RUNTIME=1      → 真正执行（需要真实模型 + 真实宿主；**吃额度**）。
+#
+# 断言纪律（本仓 `docs/runtime-assertion-discipline.md`）：
+#   ① 只认**文件系统事实**与**结构化字段**，不断言模型自然语言措辞；
+#   ② 前提本身要被验证（否则恒真）；
+#   ③ 每条用例配一次变红演练。
+#
+# 用法：
+#   E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-oig" \
+#   bats tests/integration/test_oracle_intent_gate.bats
+#
+# ⚠ **不用 `--standalone`**：本仓 `test_independent_build_session.bats`（2026-11-16 真跑通过）
+#   已实证本机 `opencode run` 用不带 `--standalone` 的形态工作（该文件还记录了「传它会直接失败」，
+#   虽然 `opencode run --help` 的 GLOBAL FLAGS 里**有**这个 flag ⇒ 两处说法冲突，本文件按**已跑通**的那一侧写）。
+#
+# ⚠ **通道选择**：E-B（PR-2）与 E-A（PR-3）都走**父会话 wrapper**
+#   （`opencode run --agent build` ⇒ 用 `subagent` 工具调 `agent=oracle`），而不是 `--agent oracle` 直跑
+#   （oracle 是 `mode: "subagent"`，能否被 `--agent` 直跑**未验证**）。同一条通道 ⇒ 少一个变量。
+
+load ../test_helper
+
+oig_enabled() {
+    [[ "${E2E_REAL_RUNTIME:-}" == "1" ]]
+}
+
+OIG_CASE_TIMEOUT="${OIG_CASE_TIMEOUT:-300}"
+OIG_ROOT="${OIG_ROOT:-$REPO_ROOT/.tmp-oig}"
+OIG_SRC="${SC_SRC:-$HOME/.config/opencode}"
+OIG_REPORT="${OIG_REPORT:-$REPO_ROOT/.rddf/reviews/oracle-intent-gate-e2e-observation.md}"
+OIG_FIXTURE_ROOT="${OIG_FIXTURE_ROOT:-$REPO_ROOT/.tmp-oig-fixtures}"
+
+# 主证据载体（design D2）：A = `part.state.output`；B = 落盘 `.rddf/reviews/<adr>.md`。
+# ⚠ **未跑探针前保持 `pending`** ⇒ 依赖它的用例 **skip**（不许假设 A 可用）。
+OIG_CARRIER="${OIG_CARRIER:-pending}"
+
+setup() {
+    # 路径变量必须在 skip 之前导出：setup 里 skip 时 teardown **仍然执行**，
+    # 而 teardown 会调 oig_kill_processes —— 前缀为空时它会退化成匹配一切。
+    export OIG_ROOT OIG_SRC OIG_REPORT
+    mkdir -p "$OIG_ROOT" "$OIG_FIXTURE_ROOT" "$(dirname "$OIG_REPORT")"
+}
+
+# ⚠ **不**在 setup 里全局 skip：本文件含**零模型**用例（AC7-① 的两次变红演练），
+#   它们应当**进 CI**。⇒ 需要真实运行时的用例在**用例开头**调本函数。
+#   （惯例参照本仓 `test_independent_build_session_vocab.bats`：零额度判据不该被运行时门控一起跳过。）
+oig_require_runtime() {
+    oig_enabled || skip "运行时用例需显式开启：E2E_REAL_RUNTIME=1（默认 skip，不进 CI）"
+}
+
+teardown() {
+    oig_kill_processes
+}
+
+# ── 进程清理（照 `test_subagent_contract_runtime.bats` 的 `sc_kill_sc_processes`）──
+# 背景服务继承 OPENCODE_DB 但不随父进程退出 ⇒ 临时目录被占住（rm: Device or resource busy）。
+oig_kill_processes() {
+    [ -n "${OIG_ROOT:-}" ] || return 0
+    case "$OIG_ROOT" in /*) ;; *) return 0 ;; esac
+    local pid db
+    for pid in $(pgrep -f "opencode" 2>/dev/null || true); do
+        [ -r "/proc/$pid/environ" ] || continue
+        db="$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^OPENCODE_DB=//p')"
+        case "$db" in
+            "$OIG_ROOT"/*) kill -9 "$pid" 2>/dev/null || true ;;
+        esac
+    done
+}
+
+# ── 真源派生（**唯一真源 = $OIG_SRC/prompts/oracle.md**，不手抄词表）───────────
+
+# 判定行正则（**其他审查**那一套：`判定: APPROVE | REJECT`）
+#   ⚠ 本文件的审查对象是项目 `docs/adr/**` ⇒ **不属治理面**（build.md 治理面作用域表右列）
+#     ⇒ 不接受「治理面判定:」那一套（design D4）。
+oig_verdict_pattern() {
+    python3 - "$OIG_SRC/prompts/oracle.md" <<'PY'
+import re, sys
+path = sys.argv[1]
+try:
+    md = open(path, encoding="utf-8", errors="replace").read()
+except OSError as e:
+    sys.exit(f"读不到真源 {path}: {e}")
+m = re.search(r"^## 模式\s*$(.*?)^## ", md, re.M | re.S)
+if not m:
+    sys.exit(f"真源 {path} 缺「## 模式」段")
+seg = m.group(1)
+v = re.search(r"其他审查\s*⇒\s*`判定:\s*([A-Za-z_ |]+)`", seg)
+if not v:
+    sys.exit("真源「模式」段缺「其他审查 ⇒ `判定: …`」词表（判据派生锚点失效）")
+vals = [x.strip() for x in v.group(1).split("|") if x.strip()]
+if not vals:
+    sys.exit("真源「判定:」词表为空 ⇒ 派生锚点失效")
+print(r"^判定:\s*(" + "|".join(vals) + r")\b")
+PY
+}
+
+# 意图陈述的组成词（从意图前提表首行派生：`意图已定（要解决的问题 + 范围边界都给了）`）
+oig_intent_terms() {
+    python3 - "$OIG_SRC/prompts/oracle.md" <<'PY'
+import re, sys
+path = sys.argv[1]
+try:
+    md = open(path, encoding="utf-8", errors="replace").read()
+except OSError as e:
+    sys.exit(f"读不到真源 {path}: {e}")
+m = re.search(r"意图已定（(.+?)都给了）", md)
+if not m:
+    sys.exit("真源缺「意图已定（…都给了）」⇒ 术语派生锚点失效（意图前提段被删/被改写？）")
+terms = [t.strip() for t in m.group(1).split("+") if t.strip()]
+if len(terms) < 2:
+    sys.exit(f"意图陈述的组成词只派生出 {len(terms)} 项 ⇒ 派生锚点失效")
+print("\n".join(terms))
+PY
+}
+
+# ── fixture（design D5）─────────────────────────────────────────────────────
+# 最小 git 工程 + `docs/adr/`（**必须存在**：判定三态第 3 态是「一个都不存在 ⇒ 只讨论不落文档」）
+# + `role.json`（role-v2 全集，current_role=architect）。
+oig_fixture() {
+    local name="$1"
+    local dest="$OIG_FIXTURE_ROOT/$name"
+    local marker="$OIG_FIXTURE_ROOT/${name}.oig-owner"
+    mkdir -p "$OIG_FIXTURE_ROOT"
+    if [ -d "$dest" ] && [ -f "$marker" ]; then
+        rm -rf "$dest"
+    elif [ -d "$dest" ]; then
+        dest="$OIG_FIXTURE_ROOT/${name}-$(date +%s)"
+        marker="$dest.oig-owner"
+    fi
+    mkdir -p "$dest/src" "$dest/docs/adr" "$dest/.rddf/state"
+    printf 'export const x = 1\n' > "$dest/src/app.ts"
+    cat > "$dest/docs/adr/ADR-001.md" <<'ADR'
+# ADR-001 读路径缓存
+
+- Status: Accepted
+- Date: 2026-01-01
+
+## 背景与问题
+
+读接口 p95 延迟偏高。
+
+## 决策
+
+在读路径加一层进程内缓存。
+
+## 后果 / 代价
+
+- 正面：p95 下降。
+- 负面：写路径的一致性变复杂 ⇒ 本期不动写路径。
+ADR
+    cat > "$dest/.rddf/state/role.json" <<'JSON'
+{"current_role":"architect","updated_at":"2026-01-01T00:00:00.000Z","updated_by":"user","session_id":"oig-fixture","auto_switch_window":null,"history":[],"sessions":{"oig-fixture":{"current_role":"architect","auto_switch_window":null,"auto_answer":null,"updated_at":"2026-01-01T00:00:00.000Z"}},"schema_version":"role-v2"}
+JSON
+    git -C "$dest" init -q
+    git -C "$dest" config user.email "oig@test.local"
+    git -C "$dest" config user.name "OIG Test"
+    git -C "$dest" add -A
+    git -C "$dest" commit -q -m "oig fixture"
+    printf 'oig-owned\n' > "$marker"
+    printf '%s' "$dest"
+}
+
+oig_new_session() {
+    printf 'ses_%s' "$(head -c 26 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 26)"
+}
+
+# ── 跑一次父会话（照 IBS 的 ib_run：**不带 `--standalone`**）──────────────────
+# $1 = 名字  $2 = 工程目录  $3 = prompt  $4 = session id
+oig_run_parent() {
+    local name="$1" cwd="$2" prompt="$3" sid="$4"
+    local out="$OIG_ROOT/${name}.json" err="$OIG_ROOT/${name}.err" rc=0
+    local model_args=()
+    [ -n "${OIG_MODEL:-}" ] && model_args=(--model "$OIG_MODEL")
+    ( cd "$cwd" && timeout "$OIG_CASE_TIMEOUT" opencode run --agent build \
+        --session "$sid" --format json "${model_args[@]}" "$prompt" ) >"$out" 2>"$err" || rc=$?
+    printf '%s' "$rc" > "$OIG_ROOT/${name}.rc"
+    printf 'exit_code=%s\nstdout=%s\nstderr=%s\n' "$rc" "$out" "$err" > "$OIG_ROOT/${name}.meta"
+    oig_skip_if_unusable "$name" "$out" "$err" "$rc"
+    return 0
+}
+
+# ── skip 纪律（design D7 三档；**一律不得当绿**）────────────────────────────────
+oig_skip_if_unusable() {
+    local name="$1" out="$2" err="$3" rc="$4"
+    if grep -q 'provider.rate-limit\|rate_limit\|insufficient_quota' "$out" "$err" 2>/dev/null; then
+        skip "provider 额度不足（本用例未判定）：见 $out / $err"
+    fi
+    if [ "$rc" -eq 124 ]; then
+        skip "父会话超时（本用例未判定）：见 $out"
+    fi
+    # 没有任何 oracle 调用 ⇒ 前提未成立（不是契约回归）
+    if ! grep -q '"tool":"subagent"' "$out" 2>/dev/null; then
+        skip "父会话未产生 subagent 调用（本用例未判定）：见 $out"
+    fi
+}
+
+# ── 从 NDJSON 里取 subagent 调用（含 **output 通道** —— AC1 探针要的就是它）──────
+# 输出每行：{"i":..,"status":..,"agent":..,"prompt_len":N,"output_len":N,"output_head":".."}
+oig_subagent_calls() {
+    python3 - "$1" <<'PY'
+import json, sys
+try:
+    raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError as e:
+    sys.exit(f"读不到 NDJSON: {e}")
+idx = 0
+for line in raw.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get("type") != "tool_use":
+        continue
+    part = ev.get("part") or {}
+    if part.get("tool") != "subagent":
+        continue
+    st = part.get("state") or {}
+    inp = st.get("input") or {}
+    prompt = inp.get("prompt") if isinstance(inp.get("prompt"), str) else ""
+    out = st.get("output")
+    out_s = out if isinstance(out, str) else json.dumps(out, ensure_ascii=False) if out is not None else ""
+    idx += 1
+    print(json.dumps({
+        "i": idx,
+        "status": st.get("status"),
+        "agent": inp.get("agent"),
+        "prompt_len": len(prompt),
+        "output_len": len(out_s),
+        "output_head": out_s[:200].replace("\n", "\\n"),
+        "error": (st.get("error") if isinstance(st.get("error"), str) else ""),
+    }, ensure_ascii=False, separators=(",", ":")))
+PY
+}
+
+# 全部 text 事件拼成的正文（父会话的最终响应）
+oig_text_of() {
+    python3 - "$1" <<'PY'
+import json, sys
+texts = []
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    part = obj.get("part") or {}
+    if part.get("type") == "text" and part.get("text"):
+        texts.append(part["text"])
+print("\n".join(texts))
+PY
+}
+
+# ── 报告（AC8：固定 9 列）──────────────────────────────────────────────────
+oig_report_init() {
+    if [ -f "$OIG_REPORT" ]; then
+        return 0
+    fi
+    mkdir -p "$(dirname "$OIG_REPORT")"
+    cat > "$OIG_REPORT" <<'MD'
+# oracle-intent-gate-e2e 观察报告
+
+> 判据真源：`~/.config/opencode/openspec/changes/oracle-intent-gate-e2e/proposal.md`（AC1–AC8）
+> 本文件由 `tests/integration/test_oracle_intent_gate.bats` 追加；**固定 9 列**（AC8）。
+
+## 1. 探针结论（AC1）
+
+- 主证据载体：**pending**（探针未跑 / 或跑完由用例回填 A / B）
+- `part.state.output` 通道：未验证
+
+## 2. 记录表
+
+| 用例 | 模型 id | 日期 | 请求指纹 | 尝试次数 | 全部调用序号 | 结论 | 证据路径 | SC_SRC 路径 + HEAD |
+|---|---|---|---|---|---|---|---|---|
+MD
+}
+
+oig_report_row() {
+    local case_name="$1" model="$2" fingerprint="$3" attempts="$4" calls="$5" verdict="$6" evidence="$7"
+    local src_head
+    src_head="$(git -C "$OIG_SRC" rev-parse --short HEAD 2>/dev/null || echo "no-git")"
+    printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s (%s) |\n' \
+        "$case_name" "${model:-default}" "$(date -u +%Y-%m-%d)" "$fingerprint" "$attempts" "$calls" \
+        "$verdict" "$evidence" "$OIG_SRC" "$src_head" >> "$OIG_REPORT"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC7-① 变红演练：真源缺判定行词表 ⇒ 派生必须**红**（**零模型**）
+#   ⚠ 方向必须对：删的是**判定行词表**（删「意图前提段」不会让 E-A 红 —— 那是两组独立 bullet，
+#     删闸门只会让 oracle 不再拒发、判定行照样出现 ⇒ 见 design D8）。
+# ══════════════════════════════════════════════════════════════════════════
+@test "AC7-①（零模型）：删掉真源的判定行词表 ⇒ 派生必须失败（不得静默返回空正则）" {
+    local src="$OIG_ROOT/src-no-verdict"
+    mkdir -p "$src/prompts"
+    python3 - "$OIG_SRC/prompts/oracle.md" "$src/prompts/oracle.md" <<'PY'
+import re, sys
+md = open(sys.argv[1], encoding="utf-8").read()
+# 删掉「其他审查 ⇒ `判定: …`」那一行（模拟真源缺词表）
+out = re.sub(r"^- 其他审查 ⇒ `判定:[^\n]*\n", "", md, flags=re.M)
+if out == md:
+    sys.exit("注入失败：真源里没找到「其他审查 ⇒ 判定: …」行 ⇒ 本演练的锚点已变")
+open(sys.argv[2], "w", encoding="utf-8").write(out)
+PY
+    local pat rc=0
+    pat="$(OIG_SRC="$src" oig_verdict_pattern 2>&1)" || rc=$?
+    [ "$rc" -ne 0 ] || { echo "❌ 真源缺词表时派生**没有**失败（返回：$pat）⇒ 判据会静默变绿/空转" >&2; return 1; }
+    echo "$pat" | grep -q "缺「其他审查" || { echo "❌ 失败信息没指出缺哪一段：$pat" >&2; return 1; }
+    echo "✅ 演练通过：真源缺判定行词表 ⇒ 派生失败，信息：$pat"
+}
+
+@test "AC7-①b（零模型）：删掉真源的意图前提段 ⇒ 术语派生必须失败（而不是返回空列表）" {
+    local src="$OIG_ROOT/src-no-premise"
+    mkdir -p "$src/prompts"
+    python3 - "$OIG_SRC/prompts/oracle.md" "$src/prompts/oracle.md" <<'PY'
+import re, sys
+md = open(sys.argv[1], encoding="utf-8").read()
+out = re.sub(r"意图已定（(.+?)都给了）", "意图已定（已删）", md)
+if out == md:
+    sys.exit("注入失败：真源里没找到「意图已定（…都给了）」⇒ 本演练的锚点已变")
+open(sys.argv[2], "w", encoding="utf-8").write(out)
+PY
+    local terms rc=0
+    terms="$(OIG_SRC="$src" oig_intent_terms 2>&1)" || rc=$?
+    [ "$rc" -ne 0 ] || { echo "❌ 真源缺意图前提段时术语派生**没有**失败（返回：$terms）" >&2; return 1; }
+    echo "$terms" | grep -q "意图已定" || { echo "❌ 失败信息没指出锚点：$terms" >&2; return 1; }
+    echo "✅ 演练通过：术语派生失败，信息：$terms"
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC1 探针：`subagent` 的 `part.state.output` 通道**是否存在全文**
+#   这是 E-A/E-B 主证据载体的**前置**（design D2）⇒ 必须先跑它，再定 OIG_CARRIER。
+# ══════════════════════════════════════════════════════════════════════════
+@test "AC1 探针：subagent 的 state.output 通道（打印长度 + 首 200 字符）" {
+    oig_require_runtime
+    local proj sid
+    proj="$(oig_fixture probe)"
+    sid="$(oig_new_session)"
+    oig_report_init
+
+    local prompt="只做一件事：用 subagent 工具调用一次，agent 必须是 oracle，description 填 oig-probe，prompt 参数必须是下面这段原文（不要改写、不要补充）：
+请给一句话结论：读路径加缓存有什么风险？"
+    oig_run_parent probe "$proj" "$prompt" "$sid"
+
+    local calls
+    calls="$(oig_subagent_calls "$OIG_ROOT/probe.json")"
+    [ -n "$calls" ] || { echo "❌ 没有解析到 subagent 调用：$(head -c 400 "$OIG_ROOT/probe.json")" >&2; return 1; }
+
+    local oracle_calls
+    oracle_calls="$(echo "$calls" | grep '"agent":"oracle"' || true)"
+    [ -n "$oracle_calls" ] || { echo "❌ 没有 agent=oracle 的调用（实际：$calls）" >&2; return 1; }
+
+    local first status out_len out_head
+    first="$(echo "$oracle_calls" | head -1)"
+    status="$(echo "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')"
+    out_len="$(echo "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["output_len"])')"
+    out_head="$(echo "$first" | python3 -c 'import json,sys; print(json.load(sys.stdin)["output_head"])')"
+
+    echo "── 探针结果 ──"
+    echo "status=$status output_len=$out_len"
+    echo "output_head=$out_head"
+
+    # 载体判定（**写进报告**，供 E-A / E-B 使用）
+    local carrier="B"
+    if [ "$status" = "completed" ] && [ "${out_len:-0}" -gt 0 ]; then
+        carrier="A"
+    fi
+    {
+        echo ""
+        echo "### AC1 探针实测（$(date -u +%Y-%m-%dT%H:%M:%SZ)）"
+        echo ""
+        echo "- status: \`$status\`"
+        echo "- \`part.state.output\` 长度: **$out_len**"
+        echo "- 首 200 字符: \`${out_head:-<空>}\`"
+        echo "- **载体判定: $carrier**（A = \`state.output\` 有全文；B = 退到落盘 \`.rddf/reviews/<adr>.md\`）"
+        echo "- ⚠ 后续用例须以 \`OIG_CARRIER=$carrier\` 运行（不许假设 A 可用 —— design D2）"
+    } >> "$OIG_REPORT"
+
+    oig_report_row "AC1 探针" "${OIG_MODEL:-default}" "prompt_len=${#prompt}" "1" "1" "carrier=$carrier" "$OIG_ROOT/probe.json"
+
+    [ -n "$out_head" ] || { echo "⚠ state.output 为空 ⇒ 载体退 B（见报告）"; }
+}

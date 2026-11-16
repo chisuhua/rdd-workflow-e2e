@@ -16,3 +16,7 @@
 
 # subagent 输入契约运行时测试的 scratch 空间（hermetic HOME / NDJSON / 契约日志）
 .tmp-sc/
+
+# oracle 意图闸门运行时测试的 scratch 空间（fixture 工程 / NDJSON / 报告草稿）
+.tmp-oig/
+.tmp-oig-fixtures/
