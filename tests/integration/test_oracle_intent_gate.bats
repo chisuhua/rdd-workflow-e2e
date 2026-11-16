@@ -163,6 +163,21 @@ ADR
     cat > "$dest/.rddf/state/role.json" <<'JSON'
 {"current_role":"architect","updated_at":"2026-01-01T00:00:00.000Z","updated_by":"user","session_id":"oig-fixture","auto_switch_window":null,"history":[],"sessions":{"oig-fixture":{"current_role":"architect","auto_switch_window":null,"auto_answer":null,"updated_at":"2026-01-01T00:00:00.000Z"}},"schema_version":"role-v2"}
 JSON
+    cat > "$dest/docs/adr/draft-002.md" <<'ADR2'
+# draft-002 读路径缓存选型（待审）
+
+- Status: Draft
+- Date: 2026-01-02
+
+## 决策
+
+读路径使用进程内 LRU 缓存，写时失效。
+
+## 后果 / 代价
+
+- 正面：读 p95 预期显著下降。
+- 负面：多进程部署时各进程缓存独立。
+ADR2
     git -C "$dest" init -q
     git -C "$dest" config user.email "oig@test.local"
     git -C "$dest" config user.name "OIG Test"
@@ -531,4 +546,152 @@ $p2
 
     oig_report_row "AC5 E-B" "${OIG_MODEL:-default}" "state1+state2" "1" "2" "$verdict" "$OIG_ROOT/eb.json"
     # **不 fail**：观察项（用户裁决）。
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC4 观察：把 `agent=oracle` 调用的**入参 prompt 原文**逐字落文件（**不判红**）
+#   输出：`$prefix.prompt<N>.txt`；同时打印每条的 agent 与长度。
+# ══════════════════════════════════════════════════════════════════════════
+oig_dump_prompts() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+prefix = sys.argv[2]
+idx = 0
+for line in raw.splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except Exception:
+        continue
+    if ev.get("type") != "tool_use":
+        continue
+    part = ev.get("part") or {}
+    if part.get("tool") != "subagent":
+        continue
+    st = part.get("state") or {}
+    inp = st.get("input") or {}
+    if inp.get("agent") != "oracle":
+        continue
+    idx += 1
+    prompt = inp.get("prompt") if isinstance(inp.get("prompt"), str) else ""
+    open(f"{prefix}.prompt{idx}.txt", "w", encoding="utf-8").write(prompt)
+    print(f"{prefix}.prompt{idx}.txt\tlen={len(prompt)}")
+PY
+}
+
+# 入参里「含 / 不含」真源派生的意图陈述组成词（**观察，不判红**）
+#   exit 0 = 全部含；1 = 缺若干；2 = 派生失败
+oig_prompt_term_report() {
+    local prompt_file="$1" terms
+    terms="$(oig_intent_terms)" || return 2
+    python3 - "$prompt_file" "$terms" <<'PY'
+import sys
+prompt = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+terms = [t for t in sys.argv[2].split("\n") if t.strip()]
+missing = [t for t in terms if t not in prompt]
+if not missing:
+    print("含全部组成词：" + " / ".join(terms))
+    sys.exit(0)
+print("缺组成词：" + " / ".join(missing))
+sys.exit(1)
+PY
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC2 / AC3 / AC4 E-A：architect 角色 + 明确**审查**请求
+#   AC3 前提（守）：确有 `agent=oracle` 调用；未发生 ⇒ **skip 未判定**（不得当绿）
+#   AC2 门禁（硬）：**最后一次** oracle 调用的返回含 `^判定: (APPROVE|REJECT)`
+#   AC4 观察（不判红）：入参 prompt 原文落报告 + 标注「含 / 不含」组成词
+# ══════════════════════════════════════════════════════════════════════════
+@test "AC2/AC3/AC4 E-A（硬门禁）：architect 审查 ⇒ oracle 返回含判定行；入参原文落报告" {
+    oig_require_runtime
+    [ "$OIG_CARRIER" = "A" ] || skip "OIG_CARRIER=$OIG_CARRIER：E-A 需 state.output 载体（design D2）"
+
+    local proj sid
+    proj="$(oig_fixture ea)"
+    sid="$(oig_new_session)"
+    oig_report_init
+
+    # 意图**以叙述嵌入**（给内容不给槽位名 —— design D5），并要求**审查**（产物 + 判据）
+    local prompt='我们打算给**读接口**单独加一层进程内缓存：读 p95 现在约 480ms，目标是压到 120ms 以下。
+范围边界：**只动读路径**；写路径的强一致这期完全不动，也不引入外部缓存组件。
+请以**审查模式**审查 `docs/adr/draft-002.md` 这个决策，判据是「与既有决策 / 契约是否冲突」。'
+    oig_run_parent ea "$proj" "$prompt" "$sid"
+
+    # ── AC3 前提：确有 oracle 调用（未发生 ⇒ skip，不得当绿）──
+    local dumped n
+    dumped="$(oig_dump_outputs "$OIG_ROOT/ea.json" "$OIG_ROOT/ea")"
+    n="$(printf '%s\n' "$dumped" | grep -c . || true)"
+    if [ "$n" -lt 1 ]; then
+        skip "父模型未调 oracle（前提未成立，本用例未判定）—— subagent 调用：$(grep -o '"agent":"[a-z]*"' "$OIG_ROOT/ea.json" 2>/dev/null | sort -u | tr '\n' ' ' || true)"
+    fi
+
+    # 登记 metis 是否插入（其输出会作**材料**进 oracle 输入 ⇒ AC4 数据失真）
+    local metis_seen="否"
+    grep -q '"agent":"metis"' "$OIG_ROOT/ea.json" 2>/dev/null && metis_seen="是"
+
+    # ── 状态门控（D7）：取**最后一次**，未完成 ⇒ skip ──
+    local last="$OIG_ROOT/ea.call$n.txt" lastline
+    lastline="$(printf '%s\n' "$dumped" | tail -1)"
+    printf '%s\n' "$lastline" | grep -q 'status=completed' \
+        || skip "最后一次 oracle 调用未完成（本用例未判定）：$lastline"
+
+    # ── AC4 观察（不判红）：入参原文 + 组成词标注 ──
+    local pdumped plen term_report term_rc=0
+    pdumped="$(oig_dump_prompts "$OIG_ROOT/ea.json" "$OIG_ROOT/ea")"
+    plen="$(printf '%s\n' "$pdumped" | tail -1 | sed -n 's/.*len=//p')"
+    term_report="$(oig_prompt_term_report "$OIG_ROOT/ea.prompt$n.txt")" || term_rc=$?
+
+    echo "── E-A 结果 ──"
+    echo "oracle 调用次数: $n（metis 插入: $metis_seen）"
+    echo "最后一次入参长度: ${plen:-?}"
+    echo "入参组成词: $term_report"
+
+    # ── AC2 门禁（硬）：判定行 ──
+    local has=1
+    oig_has_verdict "$last" && has=0
+
+    # 观察（不判红）：**任一**判定行（治理面档 or 其他审查档）⇒ 区分两种失败态：
+    #   ① 审查根本没发生（无任何判定行）② 审查发生了但**词表选错**（用了治理面档）。
+    local any_verdict="无"
+    local gov_line
+    gov_line="$(grep -oE '^治理面判定:[[:space:]]*[A-Z-]+' "$last" | head -1 || true)"
+    if [ "$has" -eq 0 ]; then
+        any_verdict="有（其他审查档：判定: …）"
+    elif [ -n "$gov_line" ]; then
+        any_verdict="有但**词表选错**（$gov_line —— 被审对象是项目 docs/adr/**，**不属**治理面）"
+    fi
+    echo "任一判定行: $any_verdict"
+
+    {
+        echo ""
+        echo "### AC2/AC3/AC4 E-A（$(date -u +%Y-%m-%dT%H:%M:%SZ)）"
+        echo ""
+        echo "- oracle 调用次数：**$n**；\`agent=metis\` 是否插入：**$metis_seen**"
+        echo "- 最后一次入参长度：\`${plen:-?}\`"
+        echo "- 入参组成词（AC4 观察，**不判红**）：$term_report"
+        echo "- 最后一次返回是否含**契约判定行**（\`判定: APPROVE|REJECT\`）：**$( [ "$has" -eq 0 ] && echo 是 || echo 否 )**"
+        echo "- 任一判定行（观察，区分两种失败态）：$any_verdict"
+        echo "- 入参原文：\`$OIG_ROOT/ea.prompt$n.txt\`；返回正文：\`$last\`"
+        echo "- ⚠ 若 metis=是 ⇒ 入参里的组成词可能来自 **metis 转述** ⇒ AC4 数据不可用于判父侧"
+        echo "- ⚠ 实验设计残余：被审产物 \`draft-002.md\` 自身可能含意图线索 ⇒ 与 E-B 同类的替代解释"
+    } >> "$OIG_REPORT"
+
+    local verdict_txt
+    verdict_txt="$( [ "$has" -eq 0 ] && echo "判定行=有" || echo "判定行=无" )"
+    oig_report_row "AC2/AC3/AC4 E-A" "${OIG_MODEL:-default}" "prompt_len=${#prompt}" "1" "$n" \
+        "$verdict_txt / metis=$metis_seen" "$OIG_ROOT/ea.json"
+
+    [ "$has" -eq 0 ] || {
+        echo "❌ AC2 门禁失败：最后一次 oracle 返回**没有**契约判定行（期望 \`^判定: (APPROVE|REJECT)\`）" >&2
+        echo "   任一判定行：$any_verdict" >&2
+        echo "   返回正文前 400 字符：$(head -c 400 "$last" | tr '\n' ' ')" >&2
+        echo "   ⚠ 先看 AC4 观察：若父模型没带意图陈述 ⇒ oracle 拒发是**规则生效**（不是缺陷）；" >&2
+        echo "     若带了意图仍无判定行 ⇒ 两种可能：(a) 审查没发生 (b) **词表选错**（见上面「任一判定行」）；" >&2
+        echo "     后者是**规则/模型的实际行为**，不是测试缺陷 ⇒ 记观察报告 + 另立 change，不在本 change 改判据。" >&2
+        return 1
+    }
 }
