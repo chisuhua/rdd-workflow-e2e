@@ -97,6 +97,60 @@ print("\n".join(texts))
 PYEOF
 }
 
+# ib_write_targets_of <opencode json 输出文件>：**写类工具调用的写目标**（每行 `tool<TAB>target`）
+#   ⚠ **按写目标判定**（**不是**「零工具调用」）：`read`/`shell` 之类的调用不该误伤；
+#     而「改了又改回来」在 `git status` 上是**干净**的 ⇒ 只有按写目标才抓得到。
+#   ⚠ **已知盲区**：`shell` 写盘（`sed -i` / `tee`）**抓不到** —— opencode 的权限层
+#     不按角色约束 shell（`prompts/build.md` 明说）⇒ 已登记为已知残留（AC14）。
+ib_write_targets_of() {
+    python3 - "$1" <<'PYEOF'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    part = obj.get("part") or {}
+    if part.get("type") != "tool":
+        continue
+    tool = part.get("tool")
+    if tool not in ("edit", "write", "multiedit", "patch"):
+        continue
+    inp = (part.get("state") or {}).get("input") or {}
+    target = inp.get("filePath") or inp.get("path") or ""
+    print(f"{tool}\t{target}")
+PYEOF
+}
+
+# ib_has_successful_tool <opencode json 输出文件>：是否**真的推进**过（有一个成功的工具调用）
+#   ⚠ `question` 排除在外 —— 它是「问用户」，不是「推进」；且在非交互环境必然 error。
+#   ⇒ 用途：**控制用例**（合法动作必须真的推进 ⇒ 唯一能判定「触发面没写太宽」的机制）。
+ib_has_successful_tool() {
+    python3 - "$1" <<'PYEOF'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    part = obj.get("part") or {}
+    if part.get("type") != "tool":
+        continue
+    if part.get("tool") == "question":
+        continue
+    st = part.get("state") or {}
+    if st.get("status") == "completed":
+        sys.exit(0)
+sys.exit(1)
+PYEOF
+}
+
 # ib_violations_of <含响应正文的文件>：三要素缺失清单（空 = 齐备）
 #   ① 拒绝 ② 解释（点明角色职责归属）③ 引导（给切换 / 破例选项）
 #   ⚠ 词表**不许放宽到糊弄话能过** —— 反例由 test_independent_build_session_vocab.bats 守着。

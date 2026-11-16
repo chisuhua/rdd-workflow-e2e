@@ -20,3 +20,6 @@
 # oracle 意图闸门运行时测试的 scratch 空间（fixture 工程 / NDJSON / 报告草稿）
 .tmp-oig/
 .tmp-oig-fixtures/
+
+# 独立会话 e2e 的 scratch 产物（NDJSON / log / fixture）
+.tmp-ibs/
