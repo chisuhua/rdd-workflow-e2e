@@ -96,13 +96,14 @@ m = re.search(r"^## 模式\s*$(.*?)^## ", md, re.M | re.S)
 if not m:
     sys.exit(f"真源 {path} 缺「## 模式」段")
 seg = m.group(1)
-v = re.search(r"其他审查\s*⇒\s*`判定:\s*([A-Za-z_ |]+)`", seg)
+v = re.search(r"其他审查\s*=\s*`判定:\s*([A-Za-z_ |]+)`", seg)
 if not v:
-    sys.exit("真源「模式」段缺「其他审查 ⇒ `判定: …`」词表（判据派生锚点失效）")
+    sys.exit("真源「模式」段缺「其他审查 = `判定: …`」词表（判据派生锚点失效）")
 vals = [x.strip() for x in v.group(1).split("|") if x.strip()]
 if not vals:
     sys.exit("真源「判定:」词表为空 ⇒ 派生锚点失效")
-print(r"^判定:\s*(" + "|".join(vals) + r")\b")
+# 允许 markdown 粗体包裹（实测 oracle 会写 `**判定: REJECT**`；行首语义不变）
+print(r"^\*{0,2}判定:\s*(" + "|".join(vals) + r")\b")
 PY
 }
 
@@ -310,6 +311,10 @@ oig_report_row() {
     local case_name="$1" model="$2" fingerprint="$3" attempts="$4" calls="$5" verdict="$6" evidence="$7"
     local src_head
     src_head="$(git -C "$OIG_SRC" rev-parse --short HEAD 2>/dev/null || echo "no-git")"
+    # 规则真源有未提交改动 ⇒ 标 `+dirty`（否则 HEAD 会让人误以为跑的是已提交文本）
+    if [ -n "$(git -C "$OIG_SRC" status --porcelain -- prompts/oracle.md prompts/build.md 2>/dev/null)" ]; then
+        src_head="$src_head+dirty"
+    fi
     printf '| %s | %s | %s | %s | %s | %s | %s | %s | %s (%s) |\n' \
         "$case_name" "${model:-default}" "$(date -u +%Y-%m-%d)" "$fingerprint" "$attempts" "$calls" \
         "$verdict" "$evidence" "$OIG_SRC" "$src_head" >> "$OIG_REPORT"
@@ -326,10 +331,10 @@ oig_report_row() {
     python3 - "$OIG_SRC/prompts/oracle.md" "$src/prompts/oracle.md" <<'PY'
 import re, sys
 md = open(sys.argv[1], encoding="utf-8").read()
-# 删掉「其他审查 ⇒ `判定: …`」那一行（模拟真源缺词表）
-out = re.sub(r"^- 其他审查 ⇒ `判定:[^\n]*\n", "", md, flags=re.M)
+# 删掉「其他审查 = `判定: …`」片段（模拟真源缺词表 —— v2.40 起词表在**定义行**里，不再单独成行）
+out = md.replace("；其他审查 = `判定: APPROVE | REJECT`", "")
 if out == md:
-    sys.exit("注入失败：真源里没找到「其他审查 ⇒ 判定: …」行 ⇒ 本演练的锚点已变")
+    sys.exit("注入失败：真源里没找到「其他审查 = 判定: …」片段 ⇒ 本演练的锚点已变")
 open(sys.argv[2], "w", encoding="utf-8").write(out)
 PY
     local pat rc=0
@@ -618,6 +623,7 @@ PY
     # 意图**以叙述嵌入**（给内容不给槽位名 —— design D5），并要求**审查**（产物 + 判据）
     local prompt='我们打算给**读接口**单独加一层进程内缓存：读 p95 现在约 480ms，目标是压到 120ms 以下。
 范围边界：**只动读路径**；写路径的强一致这期完全不动，也不引入外部缓存组件。
+审查域: 其他审查
 请以**审查模式**审查 `docs/adr/draft-002.md` 这个决策，判据是「与既有决策 / 契约是否冲突」。'
     oig_run_parent ea "$proj" "$prompt" "$sid"
 
@@ -658,7 +664,7 @@ PY
     #   ① 审查根本没发生（无任何判定行）② 审查发生了但**词表选错**（用了治理面档）。
     local any_verdict="无"
     local gov_line
-    gov_line="$(grep -oE '^治理面判定:[[:space:]]*[A-Z-]+' "$last" | head -1 || true)"
+    gov_line="$(grep -oE '^\*{0,2}治理面判定:[[:space:]]*[A-Z-]+' "$last" | head -1 || true)"
     if [ "$has" -eq 0 ]; then
         any_verdict="有（其他审查档：判定: …）"
     elif [ -n "$gov_line" ]; then
@@ -694,4 +700,91 @@ PY
         echo "     后者是**规则/模型的实际行为**，不是测试缺陷 ⇒ 记观察报告 + 另立 change，不在本 change 改判据。" >&2
         return 1
     }
+}
+
+# oracle 输出用的词表：`gov`（治理面判定:）/ `other`（判定:）/ `none`（无判定行）
+oig_word_table() {
+    local f="$1"
+    if grep -qE '^\*{0,2}治理面判定:' "$f" 2>/dev/null; then printf 'gov'; return 0; fi
+    if oig_has_verdict "$f"; then printf 'other'; return 0; fi
+    printf 'none'
+}
+
+# ══════════════════════════════════════════════════════════════════════════
+# AC5b 审查域两态差分（**观察项：不 fail** —— N=1 不排除采样噪声）
+#   态① 带声明 `审查域: 其他审查` / 态② **harness** 删掉该行（不是让模型删）
+#   判据 = **词表是否改变**（① `判定:` / ② `治理面判定:`）：
+#     改变   ⇒ 声明生效（本 change 的机制在真实行为上成立）；
+#     不改变 ⇒ 如实登记（可能是模型按路径自行判断 —— 那是**正确行为**，不是测试缺陷）。
+#   ⚠ 一次父会话发起两次 subagent 调用（同 E-B；省一轮父会话）。
+# ══════════════════════════════════════════════════════════════════════════
+@test "AC5b 审查域两态差分（观察项，不 fail）：带声明 vs 删声明 ⇒ 词表是否改变" {
+    oig_require_runtime
+    [ "$OIG_CARRIER" = "A" ] || skip "OIG_CARRIER=$OIG_CARRIER：需 state.output 载体（design D2）"
+
+    local proj sid
+    proj="$(oig_fixture ea2)"
+    sid="$(oig_new_session)"
+    oig_report_init
+
+    local body1='我们打算给**读接口**单独加一层进程内缓存：读 p95 现在约 480ms，目标是压到 120ms 以下。
+范围边界：**只动读路径**；写路径的强一致这期完全不动，也不引入外部缓存组件。
+审查域: 其他审查
+请以**审查模式**审查 `docs/adr/draft-002.md` 这个决策，判据是「与既有决策 / 契约是否冲突」。'
+    local body2='我们打算给**读接口**单独加一层进程内缓存：读 p95 现在约 480ms，目标是压到 120ms 以下。
+范围边界：**只动读路径**；写路径的强一致这期完全不动，也不引入外部缓存组件。
+请以**审查模式**审查 `docs/adr/draft-002.md` 这个决策，判据是「与既有决策 / 契约是否冲突」。'
+
+    local prompt="只做一件事，按顺序发起两次 subagent 工具调用，不要做别的。
+第 1 次：agent 必须是 oracle，description 填 oig-ac5-with-decl，prompt 参数必须逐字是：
+---
+$body1
+---
+第 2 次：agent 必须是 oracle，description 填 oig-ac5-no-decl，prompt 参数必须逐字是：
+---
+$body2
+---"
+    oig_run_parent ea2 "$proj" "$prompt" "$sid"
+
+    local dumped n
+    dumped="$(oig_dump_outputs "$OIG_ROOT/ea2.json" "$OIG_ROOT/ea2")"
+    n="$(printf '%s\n' "$dumped" | grep -c . || true)"
+    [ "$n" -ge 2 ] || { echo "❌ 只解析到 $n 次 oracle 调用（期望 2）：$dumped" >&2; return 1; }
+    if printf '%s\n' "$dumped" | grep -v 'status=completed' >/dev/null; then
+        skip "存在未完成的 oracle 调用（本用例未判定）：$dumped"
+    fi
+
+    local f1="$OIG_ROOT/ea2.call1.txt" f2="$OIG_ROOT/ea2.call2.txt"
+    local k1 k2 m1 m2
+    k1="$(oig_word_table "$f1")"
+    k2="$(oig_word_table "$f2")"
+    # 第 4 层标注是否出现（结构化事实，不读自然语言措辞）
+    m1="no"; grep -q "审查域=未声明（默认其他审查）" "$f1" && m1="yes"
+    m2="no"; grep -q "审查域=未声明（默认其他审查）" "$f2" && m2="yes"
+
+    local verdict
+    if [ "$k1" != "$k2" ]; then
+        verdict="**词表改变**（①=$k1 / ②=$k2 ⇒ 声明生效）"
+    elif [ "$m1" = "no" ] && [ "$m2" = "yes" ]; then
+        verdict="词表未改变（两态都 $k1），但第 4 层标注只在态②出现 ⇒ 声明被识别（默认层同为 other，故词表不变）"
+    else
+        verdict="词表未改变（两态都 $k1；第 4 层标注 ①=$m1 / ②=$m2）⇒ 不可归因"
+    fi
+
+    echo "── AC5b 审查域两态 ──"
+    echo "态①（带声明）: 词表=$k1 / 第4层标注=$m1"
+    echo "态②（删声明）: 词表=$k2 / 第4层标注=$m2"
+    echo "结论: $verdict"
+
+    {
+        echo ""
+        echo "### AC5b 审查域两态差分（$(date -u +%Y-%m-%dT%H:%M:%SZ)）"
+        echo ""
+        echo "- 态①（带 \`审查域: 其他审查\`）：词表 **$k1** / 第 4 层标注 **$m1** —— \`$f1\`"
+        echo "- 态②（harness 删声明）：词表 **$k2** / 第 4 层标注 **$m2** —— \`$f2\`"
+        echo "- **结论：$verdict**"
+        echo "- ⚠ 观察项，**不 fail**；N=1 不排除采样噪声（与上游 E-B 同型）"
+    } >> "$OIG_REPORT"
+
+    oig_report_row "AC5b 审查域两态" "${OIG_MODEL:-default}" "state1+state2" "1" "2" "$verdict" "$OIG_ROOT/ea2.json"
 }
