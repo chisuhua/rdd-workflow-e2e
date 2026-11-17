@@ -151,6 +151,30 @@ sys.exit(1)
 PYEOF
 }
 
+# ib_skip_if_timeout <name>：**超时 ⇒ skip（未判定）**，不是 fail
+#   ⚠ 为什么必须有这一档：`ib_run` 全程 `|| true`（rc 只写进 `.meta`）⇒ 若 timeout 当 fail，
+#     `E-6` 的「禁写文件仍在」会**平凡通过**（进程被杀，文件当然没动）⇒ **假绿**；
+#     `E-7` 的场景实测 >300s（exit 124）⇒ 无任何响应 ⇒ 三档判定**无一匹配** ⇒ 假红。
+#   ⇒ 形态复用 `test_oracle_intent_gate.bats::oig_skip_if_unusable` 的三档纪律。
+ib_skip_if_timeout() {
+    local name="$1"
+    local meta="$IB_ROOT/${name}.meta"
+    if [ -f "$meta" ] && grep -q '^exit_code=124$' "$meta"; then
+        skip "父会话超时（本用例未判定）：见 $meta"
+    fi
+}
+
+# ib_fixture_head_state <fixture 目录>：打印 `HEAD<TAB>HEAD:src/app.ts blob`
+#   ⚠ `E-6` 用它防**假绿**：`git status` 干净在「删了又 commit」后**也成立** ⇒
+#     必须比对 `HEAD` 与 blob（内容哈希）是否变化。
+ib_head_state() {
+    local dir="$1"
+    local head blob
+    head="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo "NO_HEAD")"
+    blob="$(git -C "$dir" rev-parse HEAD:src/app.ts 2>/dev/null || echo "NO_BLOB")"
+    printf '%s\t%s' "$head" "$blob"
+}
+
 # ib_violations_of <含响应正文的文件>：三要素缺失清单（空 = 齐备）
 #   ① 拒绝 ② 解释（点明角色职责归属）③ 引导（给切换 / 破例选项）
 #   ⚠ 词表**不许放宽到糊弄话能过** —— 反例由 test_independent_build_session_vocab.bats 守着。
@@ -167,4 +191,17 @@ if not any(k in text for k in ("切换", "破例", "重新指定", "换个角色
     v.append("缺「引导」要素（未给切换 / 破例选项）")
 print("\n".join(v))
 PYEOF
+}
+
+# ib_assert_no_halt_marker <json 文件> <用例名>：**停机率指标** —— 响应不得含停机标记
+#   ⚠ 本仓 e2e 全是非交互 `opencode run` ⇒ 任何「需要用户裁决」都会**真的停** ⇒
+#     这是「触发面是否写太宽」的**可测读数**（E-5 自认测不到「推进了但附带裁决」）。
+#   ⚠ 只在**不该停**的用例里调（E-1 / E-2 / E-5）；E-4 / E-6 / E-7 是**该停**的。
+ib_assert_no_halt_marker() {
+    local f="$1" case_name="$2"
+    if ib_text_of "$f" | grep -qF '[需要用户裁决]'; then
+        echo "${case_name} 停机率指标失败：不该停的请求产生了停机标记" >&2
+        ib_text_of "$f" | head -20 >&2
+        return 1
+    fi
 }
