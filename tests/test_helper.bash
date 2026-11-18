@@ -193,6 +193,66 @@ print("\n".join(v))
 PYEOF
 }
 
+# ib_skip_if_out_of_quota <stderr 文件>：**额度不足 ⇒ skip（不是 fail）**
+#   ⚠ 抽到共享助手（两个运行时 e2e 文件都用）：额度耗尽是**持续态**，当 fail 会把
+#     「没测到」误报成「测坏了」。
+ib_skip_if_out_of_quota() {
+    local err="$1"
+    if grep -q 'provider.rate-limit\|rate_limit\|insufficient_quota' "$err" 2>/dev/null; then
+        skip "provider 额度不足（本用例未判定）"
+    fi
+}
+
+# ── commit 验证门 e2e（`test_commit_gate_runtime.bats`）的共享助手 ──────
+
+# ib_tool_errors <opencode json 输出文件>：**结构化**工具错误（每行 `tool|err`）
+#   ⚠ 只取 `part.state.error`，**不扫响应正文** —— 模型措辞不是契约，工具层错误串才是
+#     （门禁的拒绝文案是**可诊断契约**，断言它是「判据」；断言模型怎么措辞不是）。
+#   ⚠ 错误串含换行 ⇒ 后续行不带 `tool|` 前缀；判定用 `grep -F` 找**精确子串**。
+ib_tool_errors() {
+    python3 - "$1" <<'PYEOF'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    part = obj.get("part") or {}
+    if part.get("type") != "tool":
+        continue
+    st = part.get("state") or {}
+    err = st.get("error") or ""
+    if st.get("status") == "error" or err:
+        print(f"{part.get('tool')}|{err}")
+PYEOF
+}
+
+# ib_shell_commands <opencode json 输出文件>：每次 shell 工具调用的命令（换行折叠成 ` ⏎ `）
+#   用途：判定「**有没有真的发起提交尝试**」—— 没有尝试就不能算 pass（门禁没被测到 ⇒ 未判定）。
+ib_shell_commands() {
+    python3 - "$1" <<'PYEOF'
+import json, sys
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
+    try:
+        obj = json.loads(line)
+    except Exception:
+        continue
+    part = obj.get("part") or {}
+    if part.get("type") != "tool" or part.get("tool") not in ("shell", "bash"):
+        continue
+    inp = (part.get("state") or {}).get("input") or {}
+    cmd = inp.get("command") or ""
+    if cmd:
+        print(cmd.replace("\n", " ⏎ "))
+PYEOF
+}
+
 # ib_assert_no_halt_marker <json 文件> <用例名>：**停机率指标** —— 响应不得含停机标记
 #   ⚠ 本仓 e2e 全是非交互 `opencode run` ⇒ 任何「需要用户裁决」都会**真的停** ⇒
 #     这是「触发面是否写太宽」的**可测读数**（E-5 自认测不到「推进了但附带裁决」）。

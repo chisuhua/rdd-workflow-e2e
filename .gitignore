@@ -26,3 +26,6 @@
 
 # 角色感知写门 / 角色租约的运行时 e2e 的 scratch 产物（role-gate 探针 NDJSON / log / fixture）
 .tmp-rg/
+
+# commit 验证门运行时 e2e 的 scratch 空间（NDJSON / log / fixture）
+.tmp-cg/
