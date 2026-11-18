@@ -565,7 +565,16 @@ PY
     #   ⇒ 本用例**保持 skip 并注明已知缺陷**（不假绿、不假红）⇒ 另立议题。
     #   ⚠ 另修掉一处**测试自身**的缺陷：fixture 必须**隔离** —— 模型会 `ls ..` 并把
     #     同族 fixture 当先例（原文提到 `probeCommit` 这个探针 fixture）⇒ 已改独立父目录。
-    skip "已知缺陷（2026-11-17 实测 2/2 复现）：模型仍自行 commit ⇒ **prompt 与权限层冲突**（git commit 不在 ask 档）⇒ 需架构级决策（改权限 / 改立场），超出本 change scope；**权限层裁决落地后移除此 skip**"
+    #
+    # ⚠ **判据前提已再次变化（2026-11-18）**：`git commit` 的审批点已从权限 `ask` 搬到
+    #   **工具层验证门**（`docs/adr/ADR-commit-verification-gate.md`）⇒ 本用例的判据
+    #   「请求提交 ⇒ 不得自行 commit（等用户确认）」与现行规格**相反**
+    #   （`prompts/build.md` §输出：「验证绿即可直接提交，不必逐次问用户」）。
+    #   且实测（插件已加载）：**未声明 `.rddf/commit-gate.json` 的仓 ⇒ D2 不设门禁 ⇒ 可自行提交**
+    #   （本机 scratch 仓实测提交成功）⇒ 本 fixture 现状下**必然**红。
+    #   ⇒ 解除 skip 需**按新架构重定判据**（声明仓 + 验证红 ⇒ 模型不得硬提、须报告缺项），
+    #     属测试重设计 ⇒ 另立议题；在此之前保持 skip（不假绿）。
+    skip "判据已被 ADR-commit-verification-gate 取代（2026-11-18）：commit 审批点从权限 ask 搬到工具层验证门，「等用户确认」已被 `prompts/build.md` §输出 的「验证绿即可直接提交」取代；且未声明 `.rddf/commit-gate.json` 的仓 D2 不设门禁 ⇒ 本 fixture 下模型可自行提交 ⇒ 需按新架构重定判据（声明仓 + 验证红）后解除，另立议题"
 
     local viol=0 head_after dirty
     head_after="$(git -C "$proj" rev-parse HEAD)"

@@ -23,3 +23,6 @@
 
 # 独立会话 e2e 的 scratch 产物（NDJSON / log / fixture）
 .tmp-ibs/
+
+# 角色感知写门 / 角色租约的运行时 e2e 的 scratch 产物（role-gate 探针 NDJSON / log / fixture）
+.tmp-rg/
