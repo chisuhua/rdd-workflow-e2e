@@ -1,6 +1,10 @@
 # Bats ephemeral test data
 .bats-tmp/
 
+# Python bytecode（harness/ 等）
+__pycache__/
+*.pyc
+
 # L2 runtime-test scratch space (probe + L2 real-run artifacts: stdout NDJSON,
 # logs, bats TMPDIR).
 #
@@ -12,7 +16,11 @@
 .tmp-l2/
 
 # 双 session 运行时状态（活的 session id / pair 登记表，非版本化）
-.rddf/
+# ⚠ 放行 planner 的路线图 / 改进草稿与 architect 配置（它们是版本化工件）
+.rddf/*
+!.rddf/roadmap/
+!.rddf/improvements/
+!.rddf/config/
 
 # subagent 输入契约运行时测试的 scratch 空间（hermetic HOME / NDJSON / 契约日志）
 .tmp-sc/

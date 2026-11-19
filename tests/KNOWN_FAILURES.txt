@@ -9,6 +9,18 @@
 #
 # Comparison logic: see bats output diff between current run and this baseline.
 #
-# Currently no known failures — all 41 cases (19 E2E + 6 rddf CLI + 6 install
-# + 5 external + 5 other) are expected to pass cleanly. If a regression
-# occurs, add its test name here with a clear reason.
+# ── 2026-11-20：上游 rdd-workflow 漂移（非本仓引入）────────────────────────
+# 上游提交 d7a7b2d0「推荐器收敛到单一实现 + 退役 guide skill」移除了
+# skills/rddf-session/scripts/rddf_session_hooks.sh 中的
+# rddf_session_hook_poll_events；下列用例仍依赖该 hook ⇒ `command not found`。
+# 证据：在 pristine HEAD 树（`git archive HEAD` 解包到临时目录）上可复现，
+#       与 harness/ 新增代码无关。后续应把用例迁移到新的推荐器实现路径，
+#       迁移完成后删除本节。
+AC-G1: guide_entry in window A reads events.jsonl from window B's writes # 上游退役 guide skill，rddf_session_hook_poll_events 已移除
+AC-G2: multiple guide_entry calls advance offset monotonically # 同上
+AC-G3: after archive_events, guide re-reads from offset 0 # 同上
+REAL-2P-1: pane-A (guide) polling loop reads pane-B (writer) events; last_seen_offset advances # 同上（全量跑时触发，单文件跑时可能不触发）
+REAL-2P-2: pane-A and pane-B sessions are isolated by owner; pane-A only sees its own kind # 同上
+AC-5: after archive_events, active stage_guide last_seen_offset reset to 0 # 同上
+AC-6a: guide_entry in subshell + SIGTERM → stage_guide marked completed # 同上
+AC-6b: guide_entry in subshell + SIGKILL → stage_guide remains active # 同上
