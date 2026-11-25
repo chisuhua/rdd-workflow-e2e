@@ -62,8 +62,9 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 | `tests/integration/test_role_gate_runtime.bats` | 8 | **真实运行时**（同上门控）：角色感知写门 + 角色租约 —— 同角色租约冲突 / 异类放行 / 接管后原会话被拒 / 两会话各读各分区 / linked worktree 只写主仓 stateRoot / architect 写 `src/**` 真被拒 / 后端不受门控 / 非 build 主会话不参与 |
 | `tests/integration/test_commit_gate_runtime.bats` | 2 | **真实运行时**（同上门控）：commit 验证门的**接线**与**反绕过** —— CG-1（声明仓 + 验证红 ⇒ 门禁拒 + HEAD 未变 + 暂存仍在 + 声明文件未被改写）/ CG-2 **正向对照**（验证绿 ⇒ 放行、提交落地；防「门禁一律拒绝」也全绿）|
 | `tests/integration/test_independent_build_session.bats` | 7 | **真实运行时**（同上门控）：build 作为**独立会话**的行为层 —— 开场报告 / 切换写 role.json / 越权三要素 / 停机交付裁决 / 控制用例（合法动作必须推进）/ 不可逆操作不得执行 / 意图缺关键事实不得按默认推进 |
+| `tests/integration/test_plan_topics_cli.bats` | 3 | **零模型**（默认跑，无需模型/宿主）：plan-topics CLI 契约 —— PT-2 `cancel --cascade` 级联且留理由 / PT-3 `claim` 后在飞（不在 `ready` ∧ `in_flight` 含它 ∧ `check --final` exit 0）/ PT-4 未释放写锁不影响 `check`（`converged` 且 `graph.json` 逐字节不变）。⚠ 需要 opencode 配置仓（`OC_ROOT`）+ `bun`；CI 当前两者皆无 ⇒ **CI 里会 skip** |
 
-Total: **45 in-process cases, ~25s runtime** (was 42, +3 from add-guide-polling-loop-implementation).
+Total: **48 in-process cases, ~30s runtime** (was 45, +3 zero-model plan-topics CLI cases).
 
 **Plus 58 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11 + `test_role_class_runtime.bats` 4 + `test_role_gate_runtime.bats` 8 + `test_commit_gate_runtime.bats` 2 + `test_independent_build_session.bats` 7) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
 
