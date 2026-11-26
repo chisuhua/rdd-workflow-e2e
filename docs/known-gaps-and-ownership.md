@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 日期 | 2026-11-06 |
+| 日期 | 2026-11-06（**2026-11-26 复核**，见下节「2026-11-26 复核与新增覆盖」） |
 | 范围 | front+delegate 自动化测试体系落地时，**opencode 仓**（`~/.config/opencode`）尚未覆盖的 7 项缺口 + 探针期间实测新发现 2 项（第 8、9 条） |
 | 用户拍板 | 跨仓缺口**只在本仓记录，不动 opencode 仓** |
 | 配套文档 | [real-runtime-prereqs.md](./real-runtime-prereqs.md)（L2 落地的前置探针结论 + L2 实跑结果） |
@@ -26,7 +26,7 @@
 | 项 | 内容 |
 |---|---|
 | **归属仓** | opencode 仓（`~/.config/opencode/lib/delegate-core.ts` → `registerSession` + `withLock` 的 `mkdir` 协作锁） |
-| **当前判定** | **PARTIAL**（验收报告 AC12：pair-v2 与 role.json 分区均已写入，但「并发无丢失更新」未实测） |
+| **当前判定** | **PARTIAL → 仍开放（2026-11-26 复核）** —— 原判 PARTIAL（验收报告 AC12：pair-v2 与 role.json 分区均已写入，但「并发无丢失更新」未实测）。**复核结论 = 仍开放**（与「已闭合」的说法相反，故不标闭合）：① `tests/delegate-core.test.ts:425`「withLock 互斥：并发写入不丢更新」是 **10 次顺序调用**（不是真并发）；② `tests/delegate-core.test.ts:394-396` 的两次 `registerSession` 也是**顺序**；③ 真并发的现成范式在 opencode 仓 `tests/role-lease-claims.test.ts:283`（两子进程 + ready-file barrier）⇒ **关闭成本低**（照抄该范式即可），但**今天确实没有** delegate 层的真并发用例 |
 | **复现命令** | 并发发起两次 delegate，指向同一工程根 → 读该工程 `.rddf/state/pair.json`，检查两个 session 条目**都**存在；再读 `role.json` 的 `sessions` 分区，同判 |
 | **本仓 L3 是否间接覆盖** | **否**。本仓 `test_stage_guide_cross_process_e2e.bats` 的「AC-1: two processes concurrently append_event — no row loss or duplication」覆盖的是 **rdd-workflow 侧 `events.jsonl` 的 fcntl 并发写**，与 opencode 侧 `.role.lock` 的 `mkdir` 协作锁是**两套不同的锁实现**，语义相近但代码不相交 → 只能当**参照模式**，不能算覆盖 |
 | **备注** | 锁实现已存在（`withLock`：协作锁 + 30s 陈旧锁清理），缺的是**造并发的验证**。L2 用例「L2-4」扩展为并发场景即可覆盖，但需两次真实委托（模型额度） |
@@ -66,7 +66,7 @@
 | 项 | 内容 |
 |---|---|
 | **归属仓** | opencode 仓（`delegate-core.ts` 的 `newActivity` 判定：最后消息 id 变了 或 消息数变了） |
-| **当前判定** | **NOT-TESTED**（front-delegate-testing.md 覆盖矩阵第 13 行：「宿主时间线行为，⚠ 未实测」） |
+| **当前判定** | ✅ **已闭合（2026-11-26 复核）** —— 原判 NOT-TESTED（front-delegate-testing.md 覆盖矩阵第 13 行「宿主时间线行为，⚠ 未实测」）。**闭合证据**：opencode 仓 `tests/delegate-tool.test.ts:519`「prompt 无新活动 → outcome=unknown，不采信旧 outcome」（对应 `lib/delegate-core.ts:2581` 的 `newActivity = 最后消息 id 变了 || 消息数变了` ⇒ 无新活动即 `outcome=unknown`）⇒ 该分支**已被真跑覆盖**，本条不再是缺口 |
 | **复现命令** | 委托一个**不产生新消息**的工程 session（极难构造）→ 看 summary 的 `outcome` 是否为 `unknown`、`new_activity` 是否为 false |
 | **本仓 L3 是否间接覆盖** | **否**。`unknown` 的判定输入（消息 id / 消息数变化）完全是宿主时间线，本仓 L3 无从构造 |
 | **备注** | 这是 7 项里**最难**在自动化中稳定构造的一条。建议保留为人工验收项，不进 L2 |
@@ -119,6 +119,39 @@
 | **唯一真缺口** | **`$HOME` 未展开能绕过 shell 的 `external_directory` 检查**：上一轮 `dd if=$HOME/.opencode/bin/opencode bs=1 skip=… count=…` 被**放行**，而同一 session 里 `read /workspace/main/rdd-workflow/…` 被拒 → 匹配器在「零节点」时跳过了检查（验收报告 §三 已知缺口 6「shell 守卫非完备边界」的具体样本）。**归属 opencode 仓**；本轮已通过用户 grant `external_directory:/home/ubuntu/.opencode/**` 把该路径显式放行，**不再依赖绕过写法** |
 
 ---
+
+## 2026-11-26 复核与新增覆盖
+
+> 触发：opencode 仓侧 `test-completeness-debt-e2e-audit-2026-11-25` 的 S-8（「缺口表已 17 天未复核」）+ 本仓新增两族 e2e。
+> **本节只记录，不改 opencode 仓**（沿用本表「处置原则」第 1 条）。
+
+### 复核结论（9 条逐条看下来）
+
+| 条 | 结论 | 依据 |
+|---|---|---|
+| **#1** AC12 并发写盘无丢失更新 | **仍开放**（不标闭合） | `tests/delegate-core.test.ts:425` 的「并发写入不丢更新」是 **10 次顺序调用**；`:394-396` 的两次 `registerSession` 也是顺序 ⇒ **真并发的 delegate 层用例今天不存在**。关闭成本低：抄 opencode 仓 `tests/role-lease-claims.test.ts:283` 的 ready-file barrier 范式即可 |
+| **#5** `unknown` 语义（宿主时间线） | ✅ **已闭合** | opencode 仓 `tests/delegate-tool.test.ts:519`「prompt 无新活动 → outcome=unknown，不采信旧 outcome」＝ `lib/delegate-core.ts:2581` 的 `newActivity` 判定已被真跑覆盖 |
+| **#2 / #3 / #4** | 仍开放，**归属 opencode 仓** | #4（AC17 `failed`/`interrupted` 返回结构）判定逻辑在 opencode 仓 `delegate-core.ts` 的 `outcome` ⇒ **归 opencode 仓**，本仓无写入面 |
+| **#6 / #7** | 仍开放，**归属 opencode 仓** | #6（scope 只约束 edit 类目 ⇒ shell 写越界检测不到）与 #7（pair 过期清理未实现）都落在 opencode 仓 `delegate-core.ts` ⇒ **归 opencode 仓**；本仓只在「有真实运行时用例能复现时」补证据 |
+| **#8 / #9** | 维持原判 | #8 已实测复现（opencode 仓侧参数形状）；#9 = 4 处宿主策略正确行为 + 1 处已知缺口 |
+
+### 本仓新增的两族覆盖（2026-11-26）
+
+| 文件 | 层 | 覆盖什么 | 前置 |
+|---|---|---|---|
+| `tests/integration/test_plan_topics_cli.bats`（3 例） | 零模型（默认跑） | opencode 仓 `scripts/plan-topic-check.ts` 的 CLI 契约：PT-2 `cancel --cascade` / PT-3 在飞语义 / PT-4 锁无关 | 需要 opencode 配置仓 + `bun` |
+| `tests/integration/test_push_gate_runtime.bats`（2 例） | 真实运行时（`E2E_REAL_RUNTIME=1`） | opencode 仓 `plugins/push-gate.ts` **真被加载**且真能阻止 force push（PG-1）+ 非 force 不误拒（PG-2） | 真会话（2 次）+ 本地 bare 远端 |
+
+⇒ 两条**缺口**因此被覆盖/登记：`push-gate` 从「只有单测」升到「有运行时用例」；`plan-topics` 的 CLI 契约从「只有仓内单测」升到「有跨仓运行时用例」。
+
+### ⚠ CI 前置变更（2026-11-26）+ 一个必须记住的坑
+
+`.github/workflows/test.yml` 增两步：**克隆 opencode 配置仓**（`~/.config/opencode`）+ **装 `bun`** ⇒
+「真实仓」纪律用例（`test_evidence_discipline.bats` / `test_oracle_intent_gate.bats`）在 CI 里从**红**变**绿**，且上面那族零模型用例在 CI 里**真跑**（此前会 skip）。
+
+⚠ **坑：克隆 opencode 配置仓必须「完整克隆」，不能 `--depth 1`。**
+这两个纪律文件用 `git log -1 -- <file>` 判断该文件是否在「生效日」之后被改动过；**浅克隆**会让这个查询退化成「HEAD 的日期」⇒ 历史存量被误当成「新」⇒ 把 opencode 仓**刻意豁免**的旧账翻出来。
+实测（2026-11-26）：`--depth 1` ⇒ 9 条红；完整克隆 ⇒ 0 条红。
 
 ## 不是 opencode 仓缺口、但本轮实测踩到并已在本仓消化的 4 个坑
 

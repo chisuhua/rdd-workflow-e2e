@@ -47,6 +47,20 @@ jobs:
       - name: Make scripts executable
         run: chmod +x tests/scripts/*.sh install_testbed.sh
 
+      - name: Clone opencode config repo（真实仓 e2e 的被测目标）
+        run: |
+          # ⚠ **完整克隆（不要 --depth 1）**：e2e 的「生效日」过滤器用 `git log -1 -- <file>`
+          #   判定该文件是否在 epoch 之后被改动过；浅克隆会让这个查询退化成「HEAD 的日期」
+          #   ⇒ 历史存量被误当成「新」⇒ 把本仓刻意豁免的旧账翻出来。
+          #   实测（2026-11-26）：`--depth 1` ⇒ 9 条红；完整克隆 ⇒ 0 条。
+          #   代价：仓很小（配置仓），完整克隆的耗时可接受。
+          git clone "https://github.com/chisuhua/opencode-config.git" "$HOME/.config/opencode"
+
+      - name: Install bun（plan-topics CLI 以 bun 运行）
+        run: |
+          sudo npm install -g bun
+          bun --version
+
       - name: Run bats test suite
         id: bats
         run: |
