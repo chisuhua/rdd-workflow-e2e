@@ -41,3 +41,5 @@ __pycache__/
 # push-gate 运行时 e2e 的 scratch 空间（NDJSON / log / fixture）
 .tmp-pg/
 .tmp-pg-fixtures/
+.tmp-pt1/
+.tmp-pt1-fixtures/

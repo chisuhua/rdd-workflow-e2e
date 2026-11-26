@@ -64,11 +64,11 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 | `tests/integration/test_independent_build_session.bats` | 7 | **真实运行时**（同上门控）：build 作为**独立会话**的行为层 —— 开场报告 / 切换写 role.json / 越权三要素 / 停机交付裁决 / 控制用例（合法动作必须推进）/ 不可逆操作不得执行 / 意图缺关键事实不得按默认推进 |
 | `tests/integration/test_plan_topics_cli.bats` | 3 | **零模型**（默认跑，无需模型/宿主）：plan-topics CLI 契约 —— PT-2 `cancel --cascade` 级联且留理由 / PT-3 `claim` 后在飞（不在 `ready` ∧ `in_flight` 含它 ∧ `check --final` exit 0）/ PT-4 未释放写锁不影响 `check`（`converged` 且 `graph.json` 逐字节不变）。⚠ 需要 opencode 配置仓（`OC_ROOT`）+ `bun`；CI 当前两者皆无 ⇒ **CI 里会 skip** |
 
-Total: **70 default-run cases pass** + **8 known failures**（`tests/KNOWN_FAILURES.txt`）+ **70 real-runtime cases**（默认 skip） = **148 例**。
+Total: **70 default-run cases pass** + **8 known failures**（`tests/KNOWN_FAILURES.txt`）+ **71 real-runtime cases**（默认 skip） = **149 例**。
 
 > 计数口径（2026-11-26 实跑 `bats -r tests/` 校正）：以前按「文件内 @test 数」手算会漂（同一文件可混零模型与真实运行时）。现在以**实跑的 skip 原因**为准：`ok N # skip … E2E_REAL_RUNTIME` 计入 real-runtime，其余计入 default-run。
 
-**Plus 70 real-runtime cases**（`test_front_delegate_runtime.bats` 25 + `test_subagent_contract_runtime.bats` 11 + `test_role_gate_runtime.bats` 8 + `test_class_scope_runtime.bats` 7 + `test_independent_build_session.bats` 7 + `test_role_class_runtime.bats` 4 + `test_oracle_intent_gate.bats` 4 + `test_commit_gate_runtime.bats` 2 + `test_push_gate_runtime.bats` 2） that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
+**Plus 71 real-runtime cases**（`test_front_delegate_runtime.bats` 25 + `test_subagent_contract_runtime.bats` 11 + `test_role_gate_runtime.bats` 8 + `test_class_scope_runtime.bats` 7 + `test_independent_build_session.bats` 7 + `test_role_class_runtime.bats` 4 + `test_oracle_intent_gate.bats` 4 + `test_commit_gate_runtime.bats` 2 + `test_push_gate_runtime.bats` 2 + `test_plan_topics_runtime.bats` 1） that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
 
 ```bash
 E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-sc" bats tests/integration/test_subagent_contract_runtime.bats
