@@ -37,3 +37,7 @@ __pycache__/
 
 # commit 验证门运行时 e2e 的 scratch 空间（NDJSON / log / fixture）
 .tmp-cg/
+
+# push-gate 运行时 e2e 的 scratch 空间（NDJSON / log / fixture）
+.tmp-pg/
+.tmp-pg-fixtures/

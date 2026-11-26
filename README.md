@@ -66,7 +66,7 @@ Each CI run executes `./install_testbed.sh --clone` (fresh install from latest r
 
 Total: **48 in-process cases, ~30s runtime** (was 45, +3 zero-model plan-topics CLI cases).
 
-**Plus 58 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11 + `test_role_class_runtime.bats` 4 + `test_role_gate_runtime.bats` 8 + `test_commit_gate_runtime.bats` 2 + `test_independent_build_session.bats` 7) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
+**Plus 60 real-runtime cases** (`test_front_delegate_runtime.bats` 26 + `test_subagent_contract_runtime.bats` 11 + `test_role_class_runtime.bats` 4 + `test_role_gate_runtime.bats` 8 + `test_commit_gate_runtime.bats` 2 + `test_independent_build_session.bats` 7 + `test_push_gate_runtime.bats` 2) that are **skipped by default** because they need a real model + real host (`opencode run`), not available in CI:
 
 ```bash
 E2E_REAL_RUNTIME=1 TMPDIR="$PWD/.tmp-sc" bats tests/integration/test_subagent_contract_runtime.bats
