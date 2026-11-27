@@ -7,9 +7,9 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/dual-path-adr-review.md`（metis → oracle 2 轮 → critic 3 轮；末轮 **APPROVE**（`mergeable: yes`），BLOCKER 已闭合） |
 | Parent | ADR-0002（trace 合同）、ADR-0003（评测分层与准入）、ADR-0005（度量与 gate）、ADR-0006（隔离契约）、ADR-0007（层属与归属） |
-| 关联 change | `backlog: harness-p1` |
-| AC 映射 | 暂缺（change 未立项） |
-| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；**Status 维持 `Proposed`，待用户裁决**（不写成 `Accepted`） |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（**change-1：遮蔽探针 / W0 副本 / 臂索引 / eval manifest / cap 首族 / 判据审计，已实施并归档**）+ `backlog: harness-p1`（change-2：E 层主体与对照 run） |
+| AC 映射 | change-1 的 **AC-1..AC-17**（逐条判定 + 证据见 `.rddf/reviews/harness-p1-verify.md`）；本 ADR 的 **run 级判据**（join 命中率 / 翻转数 / 成本熔断 / 臂序断言 / 报告结构 / 跨臂 Δ）**全部未覆盖** ⇒ 需 runner 与真模型 run（另立 change），逐条列于本文「推迟清单」 |
+| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；2026-11-27 补充：用户裁决「以改进提案为裁决载体」⇒ change-1（`harness-p1`）已实施并归档（17/17 AC 通过 · 判据审计 pilot-001/002/003 三轮闭合 · ADR-0006 §5 隔离判定 memo 已由独立会话签署）；**Status 维持 `Proposed`**（用户未就 ADR 本身明示签批） |
 | 外部依据 | `docs/research/01-harness-and-eval-engineering.md`（plugin eval：2 臂 × 3 跑 + Δ + `--max-cost-usd` 熔断；τ-bench 状态型 oracle）、`docs/research/02-self-improvement-and-agent-evolution.md` §B3.6（沙袋 ⇒ 外部执行 + 盲化）、§B3.8（配对口径、翻转数、「同分但行为不同」拒收） |
 
 ## 背景与问题

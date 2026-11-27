@@ -7,9 +7,9 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/dual-path-adr-review.md`（metis → oracle 2 轮 → critic 3 轮；末轮 **APPROVE**（`mergeable: yes`），BLOCKER 已闭合） |
 | Parent | ADR-0001（数据面与归属）、ADR-0004（RSI 写边界与安全核）、ADR-0005（度量与 gate） |
-| 关联 change | `backlog: harness-p1`（归属声明与运行时校验的实现） |
-| AC 映射 | 暂缺（change 未立项） |
-| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；**Status 维持 `Proposed`，待用户裁决**（不写成 `Accepted`） |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（**change-1：归属声明 + 校验器 + 判据审计，已实施并归档**）+ `backlog: harness-p1`（change-2：E 层主体） |
+| AC 映射 | change-1 的 **AC-1..AC-17**（逐条判定 + 证据见 `.rddf/reviews/harness-p1-verify.md`）；本 ADR 的**运行时校验两项**与**人审清单 / 自动提案面两项**未覆盖 —— 前者需对照 run 的真实运行、后者判的是 **P2 的 RSI 提案生成器**（P2 挂起）⇒ 推迟 |
+| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；2026-11-27 补充：用户裁决「以改进提案为裁决载体」⇒ change-1（`harness-p1`）已实施并归档（17/17 AC 通过 · 判据审计 pilot-001/002/003 三轮闭合 · ADR-0006 §5 隔离判定 memo 已由独立会话签署）；**Status 维持 `Proposed`**（用户未就 ADR 本身明示签批） |
 | 外部依据 | `docs/research/02-self-improvement-and-agent-evolution.md` §B3.5（一次 hack ⇒ 全局回滚 + 判据审计 ⇒ 两类载体同等审计）、`docs/research/05-adoption-map-to-our-adrs.md` #6（臂机制）、`docs/architecture/dual-path-model.md` §2 |
 
 ## 背景与问题
