@@ -5,13 +5,13 @@
 | Status | Proposed |
 | Date | 2026-11-19 |
 | Author | architect |
-| 审稿报告 | `.rddf/reviews/harness-adr-review.md`（oracle + metis → critic；BLOCKER 已闭合） |
+| 审稿报告 | `.rddf/reviews/harness-adr-review.md`（oracle + metis → critic；BLOCKER 已闭合）；**本次 scope 修订**：`.rddf/reviews/adr-manifest-scope-amendment-review.md` |
 | 外部依据 | `docs/research/02-self-improvement-and-agent-evolution.md`（RSI 失败模式）、`docs/research/03-safety-permission-and-eval-integrity.md`（沙箱与隔离契约） |
 | Parent | ADR-0001 |
-| 关联 change | `backlog: harness-p2` |
+| 关联 change | `backlog: harness-p2`（RSI 提案面）；`backlog: harness-isolation-samesource`（manifest 三 scope 的落地 + 清单增补） |
 | 分期 | **P2（挂起）**：capability 正式集 ≥ 30 条（**按任务计，不按臂计**，ADR-0003 决策 6），且连续 4 周中至少 3 周有夜间报告被引用进 improvement notes 或 ADR context 后恢复 |
 | AC 映射 | 暂缺（change 未立项） |
-| 本次修订 | 2026-11-27：白名单**澄清**一项（rdd skill 文档**表述**纳入，**不新增其他可提案面**）+ 确立**边界单一真源**（「生成面」= 决策 3 白名单穷举；「落地面」= 决策 2 的「经人审 + 安全核扫描」；**实现类路径禁入**）+ 安全核**新增三条 glob**（`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`、`rdd-workflow/**/_lib/**`、`harness/path-config.yaml`）。**既有语义「生成允许 / 落地强制人审」未变**；P2 恢复条件、合并 gate、安全核的判定机制均不变（指向 ADR-0007 / ADR-0008） |
+| 本次修订 | **2026-11-28**：决策 4 增补**三 scope**（`repo:` / `external:` / `runtime:`），`runtime:` **不进** hard-deny 语义（`arms/` 由「清单例外」收敛为 scope 成员）；映射规则与路径解析见 ADR-0006 §1.4；覆盖列表增补「清单与探针自身的测试」。**两档强度、触发线清单、安全核判定机制不变；Status 不变**。**2026-11-27**：白名单**澄清**一项（rdd skill 文档**表述**纳入，**不新增其他可提案面**）+ 确立**边界单一真源**（「生成面」= 决策 3 白名单穷举；「落地面」= 决策 2 的「经人审 + 安全核扫描」；**实现类路径禁入**）+ 安全核**新增三条 glob**（`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`、`rdd-workflow/**/_lib/**`、`harness/path-config.yaml`）。**既有语义「生成允许 / 落地强制人审」未变**；P2 恢复条件、合并 gate、安全核的判定机制均不变（指向 ADR-0007 / ADR-0008） |
 
 ## 背景与问题
 
@@ -33,18 +33,35 @@
    - 新增 fixture 与新增用例（只允许新增文件，不允许修改安全核清单内既有文件）
    - helper 脚本、文档
    - ADR 给定边界内的阈值参数
-4. **安全核（hard-deny）**：清单化在 `harness/safety-core.manifest`（glob + 理由 + 版本）。**隔离路径（评分器 / rubric / criteria / eval 定义）与安全核共用这一份声明**——一份 manifest、两处引用，不允许两处定义（见 ADR-0006）。覆盖：
+4. **安全核（hard-deny）**：清单化在 `harness/safety-core.manifest`（**scope + glob + 理由 + 版本**）。**隔离路径（评分器 / rubric / criteria / eval 定义）与安全核共用这一份声明**——一份 manifest、两处引用，不允许两处定义（见 ADR-0006）。
+
+   **三个 scope（2026-11-28 增补）**：
+
+   | scope | 语义 | 进安全核 hard-deny？ | 对 solver |
+   |---|---|---|---|
+   | `repo:` | 本仓的**判据资产** | ✅ 是 | **不可读（仅判据资产条目；非判据条目见 ADR-0006 §1.4）+ 不可写** |
+   | `external:` | **跨仓载体**（opencode / rdd-workflow） | ✅ 是（由跨仓 gate 校） | **可读**（W2 臂需要叠加层本体）+ 不可写 |
+   | **`runtime:`** | **运行数据 / 隔离路径**（如 `~/.local/share/rddf-harness/arms/**`） | ❌ **否** —— 不是判据资产 | 不可读 + 不可写（ADR-0001 决策 4 的写者唯一性） |
+
+   ⇒ **`arms/` 归 `runtime:`**：它是同一份 manifest 的**另一个 scope**，**不**是安全核条目 —— 与 2026-11-27 的「臂索引**不进安全核条目**」排除**一致**（该排除由此收敛为 **scope 划分**，不再是清单例外）。
+   ⇒ **`runtime:` 成员 = ADR-0001 决策 2 的运行数据目录全集**（`snapshots/` `traces/` `runs/` `arms/` `proposals/`）+ ADR-0006 §1 追加的**运行数据类**隔离路径（`arms/`，已含于上列）；本 ADR 只举 `arms/**` 为例。⚠ `harness/path-config.yaml` 是**判据资产** ⇒ 归 `repo:`（ADR-0007 决策 4），**不属 `runtime:`**。⚠ `proposals/` 的「只读区」指**人审侧**读权限，**不是** solver 可读性 —— 按本表它对 solver **不可读 + 不可写**。
+   ⇒ **`runtime:` 条目只登记、不做 `audit()` 布局核对**（同 `external:`）：`harness/eval/safety_core.py::audit()` 只对 `repo:` 做 glob 核对；否则「没有 `~/.local/share/rddf-harness/` 的机器」会误判红。⚠ 但 **`external:` 仍须有「空改动 patch ⇒ deny」测试**（工具层，ADR-0004 决策 2）——「校验」在这里是两个层面，别混。
+   ⇒ 隔离声明的**映射规则与路径解析**见 ADR-0006 §1.4（本 ADR 只定清单格式与归属，不重复映射口径）。
+   ⚠ **落地状态**：`harness/safety-core.manifest` 目前仍只有 `repo:` / `external:` 两类条目，**尚未**登记 `runtime:` 条目与本决策新增的「清单与探针自身的测试」两项 ⇒ 该增补由 `harness-isolation-samesource` 落地（连带 `harness/safety-core.sha256` 同步，人审）。
+
+   覆盖：
    - `~/.config/opencode/{opencode.jsonc, AGENTS.md, subagent-contract.json}`
    - `~/.config/opencode/prompts/**`、`lib/**`、`plugins/**`、`scripts/role-*.ts`
    - `rdd-workflow/skills/rdd-verifier/**`、gate 脚本、`.rddf/state` schema
    - **`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`**（2026-11-27 新增：叠加层的**工件归属与阶段契约**载体；改其 `owns` / `not_owns` ≈ 改 single writer 声明 ⇒ 归为等效权限风险）
    - **`rdd-workflow/**/_lib/**`**（2026-11-27 新增：**顶层 `_lib/**` 与 `skills/_lib/**` 都要覆盖** —— 后者含 `cross_repo_gate.py` / `state.sh` / `state_reader.py` / `cleanup_plan_handoff.py` / `orchestrator_entry.sh` / `post_flow_wrap.sh` 等**运行时 gate / handoff 机械**，且上游 `install.sh:155-165` 正是从 `skills/_lib/` 拷进已安装 `_lib` ⇒ 只列顶层会留下「白名单里 `rdd-workflow/skills/**` 的表述」可被解读为允许对 `skills/_lib` 自动提案的**缺口**）。改 handoff / gate 的实现机械与改 `owns` 同为等效工件归属变更 ⇒ 必须同列硬拒。
    - `rdd-workflow-e2e/tests/**`、`KNOWN_FAILURES.txt`、`scripts/report_regression.sh`、`.github/workflows/**`
-   - **判据自身**：`rdd-workflow-e2e/harness/metrics/**`（指标定义与行粒度，ADR-0005 声明其为安全核）、`harness/criteria/**`（oracle 定义）、`harness/eval/**`（评测定义与 rubric）、`harness/safety-core.manifest`、`harness/safety-core.sha256`
+   - **判据自身**：`rdd-workflow-e2e/harness/metrics/**`（指标定义与行粒度，ADR-0005 声明其为安全核）、`harness/trace.py`（unit 推导口径与 trace 字段表，ADR-0002 决策 1/3 —— 2026-11-28 补登，与单文件 `metrics.py` 同列）、`harness/criteria/**`（oracle 定义）、`harness/eval/**`（评测定义与 rubric）、`harness/safety-core.manifest`、`harness/safety-core.sha256`
    - **期望归属声明**：`rdd-workflow-e2e/harness/path-config.yaml`（2026-11-27 新增：阶段归属声明 = 判据资产，ADR-0007 决策 4）
-   - ⚠ **臂索引 `arms/` 不入本清单**：它是 **runner 产出的运行数据**，不是判据资产 ⇒ 写者唯一性见 ADR-0001 决策 4，对 solver 的不可读性见 ADR-0006 §1
+   - ⚠ **臂索引 `arms/` 不进安全核（hard-deny）条目，但作为 `runtime:` 条目登记在同一份 manifest**：它是 runner 产出的运行数据，不是判据资产 ⇒ 写者唯一性见 ADR-0001 决策 4；对 solver 的不可读 / 不可写由 ADR-0006 §1.4 的 `runtime:` 派生规则给出
    - ⚠ **清单落地时必须核对 glob 与实际布局**（2026-11-27 发现）：现文的 `harness/metrics/**` 在当前布局下**匹配不到** `harness/metrics.py`（指标定义是**单文件**，`harness/` 下为 `manifest.py` / `metrics.py` / `run.py` / `snapshot.py`）⇒ 落地 `safety-core.manifest` 时必须逐条核对，否则安全核会**漏掉指标定义文件**（与 ADR-0005「指标定义属安全核」相悖）。
    - **判据的判据**：`docs/runtime-assertion-discipline.md`（ADR-0003 指定为唯一口径）、`docs/adr/**`
+   - **清单与探针自身的测试**（2026-11-28 增补）：`rdd-workflow-e2e/harness/tests/**`（安全核清单核对的回归测试 + 遮蔽探针断言的回归测试）、`harness/manifest.py`（eval manifest 构造器）—— **改它们 = 改判据的判据**。⚠ 本条是**清单内容的增补要求**，由 `harness-isolation-samesource` 落地（连带 `harness/safety-core.sha256` 同步，人审）
    - manifest 自身：哈希固定在 `harness/safety-core.sha256`（受版本控制），夜间与 CI 都校验该文件；改动它需人审 PR。
    - prompt 内机读块（`<!-- capability:` / `<!-- role-class-write-set:`）：任一非空改动 ⇒ 自动归为等效权限变更，逐行人审。⚠「**自动**归为」指**人审流程内的自动分类**，**不是**「自动生成提案」。
 5. **合并前置条件**（缺一不可）：
@@ -89,7 +106,8 @@
 
 ## Verification
 
-- [ ] `safety-core.manifest` 每条 glob 均有一个「空改动 patch ⇒ deny」测试。
+- [ ] `safety-core.manifest` 中 **`repo:` / `external:`** 每条 glob 均有一个「空改动 patch ⇒ deny」测试（`runtime:` 条目**不在此列** —— 它们是运行数据，只登记不校验；见下条）。
+- [ ] 每条条目带合法 scope（`repo` / `external` / `runtime`）；`runtime:` 条目**不进入** hard-deny 语义（构造「runtime 条目被当作安全核」的样例 ⇒ 判红）。
 - [ ] RSI 进程尝试写清单外路径时，工具层拒绝并留痕（不是仅告警）。
 - [ ] 任一 proposal 的 patch 触碰安全核时，合并流程自动终止。
 - [ ] 每个合并的 proposal 都有 A/B 结果、回滚命令与一次真实 revert 演练记录。

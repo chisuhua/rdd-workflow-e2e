@@ -6,12 +6,12 @@
 | Date | 2026-11-19 |
 | Author | architect |
 | Parent | ADR-0004（不可写集声明）、ADR-0002（trace 合同） |
-| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：§1 不可读集与 §5 判定 memo）+ `backlog: harness-criteria-prompt`（§1.4 清单同源修复）+ 对照 run change（轻量档四项机制与每 trial 断言） |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：§1 不可读集与 §5 判定 memo）+ `backlog: harness-isolation-samesource`（§1.4 清单同源修复 + manifest 三 scope 落地）+ 对照 run change（轻量档四项机制与每 trial 断言） |
 | 分期 | **语义层现在生效**；**轻量档** P1；**容器档** 待触发线（见 §5） |
 | 裁决记录 | 用户 2026-11-19 接受（默认轻量路径）。**2026-11-27 补充**：§5 判定 memo 已由独立会话签署，结论 **「修正 → 条件式」**（轻量档仅在补足路径 (a) 落地并通过探针验证的前提下足够；硬门 (i)(ii)(iii) 中 (i) 臂索引的隔离手段、(ii) 每 trial 前 `.rddf/state/**` 断言**尚未落地** ⇒ 对照 run 仍不得开工）⇒ 见 `.rddf/reviews/adr-0006-isolation-verdict.md` |
-| 本次修订 | 2026-11-27：不可读集**增补**臂索引与期望归属声明（引用 ADR-0001 / ADR-0007 / ADR-0008，不复制条款）+ §5 补判定（双路径对照**已踩触发线 (a)** ⇒ P1 开工前须判定轻量档是否足够）。**两档强度、触发线清单、语义层条款本身不变** |
+| 本次修订 | **2026-11-27**：不可读集**增补**臂索引与期望归属声明（引用 ADR-0001 / ADR-0007 / ADR-0008，不复制条款）+ §5 补判定（双路径对照**已踩触发线 (a)** ⇒ P1 开工前须判定轻量档是否足够）。**2026-11-28**：§1.4 增补**派生规则与路径解析**（三 scope 映射 + 锚点解析；`external:` 可读以保证 W2 臂可读叠加层本体；`runtime:` 承载臂索引等运行数据）。**两档强度、触发线清单、语义层条款本身不变** |
 | 外部依据 | `docs/research/03-safety-permission-and-eval-integrity.md`、`docs/research/04-observability-and-trail-contracts.md` |
-| 审稿报告 | `.rddf/reviews/harness-adr-review.md`（第 3 轮，用户批准） |
+| 审稿报告 | `.rddf/reviews/harness-adr-review.md`（第 3 轮，用户批准）；**本次 scope 修订**：`.rddf/reviews/adr-manifest-scope-amendment-review.md`（oracle 2 轮 + critic 1 轮） |
 
 ## 背景与问题
 
@@ -34,11 +34,35 @@
 
 ### 1. 语义层（现在生效，与实现无关）
 
-1. **不可读集**：评分器、rubric、eval 定义、criteria/、manifest 的**内容**对被测 agent 不可达。
+1. **不可读集**：评分器、rubric、eval 定义、criteria/、manifest 的**内容**对被测 agent 不可达。**不可读集 = 由 §1.4 的派生规则给出**；本条是**语义枚举**（每条须在 manifest 中有对应 scope 条目，**逐条对账见 Verification**）。
    - **2026-11-27 增补（引用，不复制条款）**：双路径对照的**臂索引**（`arms/`，运行数据）与**期望归属声明**（`harness/path-config.yaml`，判据资产）同样对被测 agent 不可达 —— 前者按 ADR-0001 决策 4 由 runner 独占写、后者按 ADR-0007 决策 4 进安全核；**臂标签本身不可见，但「臂可被 skill 列表反推」是已知局限**（ADR-0008 决策 1 的诚实边界），本 ADR 不假装它是完全盲化。
 2. **三段式执行**：solver（agent）→ 收集**显式声明的 artifacts** → grader（评分器）。
 3. **私有数据不注入**：gold / rubric 路径 / 参考解存 `TaskData` 扩展字段，**不进入 agent 的 prompt、环境变量、挂载**。
-4. **不可写集与安全核同源**：隔离相关路径与 ADR-0004 的安全核清单**共用一份 manifest**（`harness/safety-core.manifest`），不允许两处定义。
+4. **不可写集与安全核同源（2026-11-28 增补：派生规则与路径解析）**：隔离相关路径与 ADR-0004 的安全核清单**共用一份 manifest**（`harness/safety-core.manifest`），不允许两处定义。
+
+   **派生规则**（探针的断言集**从清单派生**，不另立常量）：
+
+   | manifest scope | 对 solver 不可读 | 对 solver 不可写 | 理由 |
+   |---|---|---|---|
+   | `repo:` | ✅ **仅判据资产** | ✅ | 本仓**判据资产**（判据 / oracle / rubric / 判据的判据）；**非判据条目**（如 `tests/**` = 回归套件）⇒ **可读 + 不可写**，须在 manifest 条目上**显式标记** `unreadable:false`（或单列 `repo-writeonly:` scope）—— **派生规则不自动把「hard-deny」升级为「不可读」** |
+   | `external:` | ❌ **不主动遮蔽**（⇒ 不进不可读集） | ✅ | 跨仓载体；**W2 臂必须能读叠加层本体** ⇒ 派生为不可读会把 W2 打死。**实际可读性按臂配置**（ADR-0008 决策 6） |
+   | `runtime:` | ✅ | ✅ | 运行数据（臂索引等）：读 = 泄露臂归属；写 = 破 ADR-0001 决策 4 的写者唯一性 |
+
+   **路径解析 = 锚点 + 运行时解析**：
+   - `repo:` 相对**仓库根**；**不得**写死绝对路径（worktree 下仓库根是 `.rddf/wt/<name>/` ⇒ 写死会全错）；
+   - `~` = **清单属主（runner / 宿主机）** 的家目录，**在 manifest 解析时一次固化，不随 solver 的 HOME 变化**；
+   - **外部仓条目须带锚点**：`env:RDD_WORKFLOW_REPO/`（环境变量解析出的跨仓仓根）或 `link:~/.agents/skills/rdd-workflow/`（安装软链目标）；**裸相对路径不得进清单**（运行时不可解析 ⇒ 派生断言无法构造）。⚠ **迁移欠账**：`harness/safety-core.manifest` 现有的 `external:rdd-workflow/skills/**` 与 `external:rdd-workflow/**/_lib/**` 是**裸相对路径** ⇒ 由 `harness-isolation-samesource` 改写为锚点形式；
+   - 比较时用**解析后的绝对路径**。
+
+   **断言前提（防空转）**：断言 = 「**该路径在 solver 环境中存在但打不开**」。路径**不存在** ⇒ 断言**空转**，**不得计为通过**（须单列为 `vacuous`，从该臂断言集剔除或要求隔离手段覆盖）。
+   ⇒ **本派生规则的适用面**：仅适用于 **capability / 对照 run 的 scratch 工作区**（工作区在仓外）。**既有 bats CS 族**（工作区 = **仓库副本** —— 见 `tests/integration/test_front_delegate_runtime.bats` 的整仓复制 + `cd $cwd && opencode run`）**不在适用面内** ⇒ 其 `tests/**` / `docs/adr/**` / `harness/**` 的可达性登记为**已知边界**（`docs/known-gaps-and-ownership.md`），**不计探针红**。
+   ⇒ 对**在适用面内**的 run：solver 工作区**不得包含**任何判据资产路径 —— 否则「不可读」与「任务可解」二选一。
+
+   **本表不覆盖什么**：① 按臂条件化的**存在性断言**（ADR-0003 决策 3 的 `.rddf/state/**`、ADR-0008 决策 6 的四类遮蔽对象）；② 臂条件化的**可读性**（已安装叠加层在禁用臂须不存在）。二者与「路径可达性」是两类断言，不得用本表派生。
+
+   **已知局限（诚实边界，须进对照报告）**：① 跨仓**源仓**（`rdd-workflow/**`）在所有臂可读 ⇒ 禁用臂（W0/W1）的 solver 仍可读到叠加层**本体文本**（只是调不到 skill），可手工复刻 W2 流程 ⇒ 与 ADR-0008 决策 1「臂可由 skill 列表反推」同级；若实测确认污染臂间差异 ⇒ 触发 ADR-0008 决策 6 的**作用范围扩展**（不改两档强度）。② 同理，`harness/path-config.yaml` 的**等价内容**（跨仓 `SKILL.md` 的 `owns` / `not_owns`，ADR-0007 决策 5）仍可读 ⇒ 「归属声明不可读」是**部分**成立。
+
+   ⇒ 探针仍是**检测器**：它证明「声明与观测一致」，**不提供**隔离；隔离手段见 §2 的轻量档机制。
 5. **判据不得自证**：被测 agent 不得参与判据生成、判据审批或判据执行。
 
 ### 2. 两档实现
@@ -134,7 +158,10 @@
 
 **语义层（现在可验）**
 
-- [ ] 安全核 manifest 中含 `harness/criteria/**`、`harness/eval/**`、评分器路径，且与隔离清单同源（diff 为空）。
+- [ ] 安全核 manifest 中含 `harness/criteria/**`、`harness/eval/**`、评分器路径；**隔离断言集由清单按 §1.4 的映射规则派生**（`repo:` / `runtime:` ⇒ 不可读 + 不可写；`external:` ⇒ 不主动遮蔽 + 不可写）。构造「改 manifest 一条 ⇒ **派生输出的** diff 非空」的样例 ⇒ 通过；派生输出与清单不一致 ⇒ 判红。
+- [ ] **§1.1 不可读集逐条对账**：评分器 / rubric / eval 定义 / `criteria/` / manifest 内容 / 臂索引 / `path-config.yaml` —— 每条在 manifest 中有对应 scope 条目（缺一 ⇒ 判红）。
+- [ ] 派生断言集**显式含** `~/.local/share/rddf-harness/arms/**`（不可读 **且** 不可写）与 `harness/path-config.yaml`（不可读）—— 对齐 `.rddf/reviews/adr-0006-isolation-verdict.md` 的硬门 (i)。
+- [ ] 断言**非空转**：路径不存在时记 `vacuous` 且**不计为通过**（构造「路径不存在」样例 ⇒ 不得判 pass）。
 - [ ] gold / rubric 路径不出现在任何 case 的 prompt、环境变量、挂载表中（路径探针，不用 grep）。
 - [ ] 被测 agent 的运行写集不含 criteria / eval 路径。
 
