@@ -11,6 +11,7 @@
 | Parent | ADR-0001 |
 | 关联 change | `backlog: harness-p0`（指标定义与 manifest）；`backlog: harness-p1`（gate 与夜间） |
 | AC 映射 | 暂缺（change 未立项） |
+| 本次修订 | 2026-11-27：`kind=eval` manifest 增 `manifest_version`、`path_config_version`、`arms_index_sha256`、`budget_usd`、`cost_usd_actual`（共 14 字段）+ 字段演进规则 + `prompt_version` 多臂并集口径 + 归属修订的四元组回滚集。**指标定义、分母口径、gate 语义一律不变**（指向 ADR-0007 / ADR-0008） |
 
 ## 背景与问题
 
@@ -69,18 +70,21 @@ P0 的成功判据是「指标可复算」，因此本 ADR 的第一要务不是
 | kind | 必填字段 |
 |---|---|
 | `metrics`（P0） | `kind`, `snapshot_sha256`, `metrics_version`, `metrics_sha`, `generated_at`, `tool_version`, `granularity` |
-| `eval`（P1+） | `kind`, `opencode_sha`, `product_sha`, `model_id`, `prompt_version`, `criteria_version`, `taskset_version`, `snapshot_sha`, `granularity`（共 8 个版本/规格字段；旧称「五元组」是本表的子集） |
+| `eval`（P1+） | `kind`, `manifest_version`, `opencode_sha`, `product_sha`, `model_id`, `prompt_version`, `criteria_version`, `taskset_version`, `snapshot_sha`, `granularity`（10 个版本/规格字段；旧称「五元组」是本表的子集），**2026-11-27 增补** `path_config_version`（期望归属声明的内容哈希，ADR-0007 决策 4）、`arms_index_sha256`（本次 run 所用臂索引的内容哈希，ADR-0008 决策 2）、`budget_usd`（本次 run 的预算上限）、`cost_usd_actual`（本次 run 的实际消耗）⇒ 共 **14** 字段 |
 
 - `criteria_version`：oracle 定义集的内容哈希（排序后拼接再哈希）。
 - `taskset_version`：用例 + fixture 集的内容哈希。
-- **回滚三元组** = `patch` + `criteria_version` + `taskset_version`；缺任一 ⇒ 复现脚本拒绝运行。
+- **回滚三元组** = `patch` + `criteria_version` + `taskset_version`；缺任一 ⇒ 复现脚本拒绝运行。**归属声明的修订另需 `path_config_version`**（改 `harness/path-config.yaml` 本身必须可回滚）⇒ 归属修订的回滚集为**四元组**（ADR-0007 决策 3）。
 
 `snapshot_sha` 与 `snapshot_sha256` 同义（统一取 SHA256）。
 
 - `snapshot_sha`：离线快照内容的 SHA256（与 ADR-0001 的「数据版本」对齐）。
-- `prompt_version`：相关 prompt 文件集合的哈希（路径排序后拼接再哈希），不使用单一语义版本号。
+- `prompt_version`：相关 prompt 文件集合的哈希（路径排序后拼接再哈希），不使用单一语义版本号。**多臂 run 口径**：它是**本次 run 涉及的全部臂的 prompt 集合的并集哈希**（各臂 prompt 不同：W0 用评测面副本、W1/W2 用治理面矩阵）⇒ **逐臂的实际 prompt 哈希记在臂索引的 `prompt_hash` 字段**（ADR-0008 决策 2），可与 `arms_index_sha256` 对账。
 - `model_id`：记录 session 级 `model_switches`；A/B 只比较无切换的 unit。
 - 评测安装必须 pin：`install_testbed.sh --ref <sha>`；CI 与 manifest 使用同一 SHA。
+- **manifest 字段演进**：字段**只增不改语义**（沿用 ADR-0002 决策 9 的 trace 演进规则）；**新增字段不算破坏性变更**，破坏性变更须升 **`manifest_version`**（该字段本身在 manifest 内 ⇒ 升版有落点；`manifest_version` 初始值 `1`）。
+- `path_config_version`：期望归属声明 `harness/path-config.yaml` 的**内容哈希**（沿用 `prompt_version` 的内容哈希模式，不使用语义版本号；ADR-0007 决策 4）。
+- `arms_index_sha256`：本次 run 所用**臂索引文件**的内容哈希；**不含臂标签本身**（臂标签只存在于 runner 侧索引内，见 ADR-0008 决策 2）。
 
 ### 4. 统计与预算
 
@@ -109,7 +113,7 @@ P0 的成功判据是「指标可复算」，因此本 ADR 的第一要务不是
 
 - P0 指标可复算：同一快照重跑必得同数。
 - CI 保持快速、无模型依赖。
-- 版本集（eval: 8 字段，含两个内容哈希）使任何结论可复现；pin 落到装置层而不是文档承诺。
+- 版本集（eval: **14** 字段，含两个内容哈希 + 预算记账 + manifest 版本号）使任何结论可复现；pin 落到装置层而不是文档承诺。
 
 **负面**
 

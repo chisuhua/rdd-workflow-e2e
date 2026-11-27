@@ -9,6 +9,8 @@
 | Parent | — |
 | 关联 change | `backlog: harness-p0` |
 | AC 映射 | 暂缺（change 未立项） |
+| 后审补写 | 2026-11-27：single writer 表增「臂索引（runner 独占）」与「期望归属声明（判据资产）」两行；运行数据目录增 `arms/`。**未改变任何决策条款**（描述性补充，理由见 ADR-0007 / ADR-0008） |
+| 后审补写 | 2026-11-27：背景中的「143 条外部用例」更正为 **149**（口径见 `README.md`：70 默认跑 + 71 真实运行时 + 8 已知失败）。**描述性更正，不影响决策** |
 
 ## 背景与问题
 
@@ -16,7 +18,7 @@ harness 需要同时处理三类东西：**代码**（抽取、任务集、runne
 
 - `~/.config/opencode`：治理面，含 agent 规则与权限；
 - `rdd-workflow`：产品面，含 gate / handoff；
-- `rdd-workflow-e2e`：评测面，已有 143 条外部用例；
+- `rdd-workflow-e2e`：评测面，已有 149 条外部用例；
 - `oh-my-openagent`：已有 usage ledger（skills/memory/reservation）。
 
 若不先定归属，会出现两个后果：① 被测对象获得修改判据的能力；② 同一指标出现两套口径。
@@ -28,6 +30,7 @@ harness 需要同时处理三类东西：**代码**（抽取、任务集、runne
    - `snapshots/`：`opencode.db` 的离线快照 + SHA256
    - `traces/`：归一化 trace（NDJSON，P1 起）
    - `runs/`：一次评测的 manifest + 结果
+   - `arms/`：臂索引 `session_id ↔ run_id ↔ arm`（运行数据；ADR-0008）
    - `proposals/`：候选 patch（只读区，人审后合并；P2 起）
 3. **报告归 `rdd-workflow-e2e/.rddf/reviews/`**（与既有验收报告同落点）。
 4. **single writer 划分（按工件 + 按进程实例）**：
@@ -37,6 +40,8 @@ harness 需要同时处理三类东西：**代码**（抽取、任务集、runne
 | `harness/**` schema / 脚本 | e2e 仓（builder 经 change 实施） |
 | `snapshots/` | 快照脚本（运行期间独占，文件名含 SHA） |
 | `traces/` `runs/` `proposals/` | 单个 harness 进程（同文件不允许双写） |
+| `arms/` 臂索引（运行数据，ADR-0008） | harness runner（独占；被测进程不得持有臂标签） |
+| `harness/path-config.yaml` 期望归属声明（判据资产，ADR-0007） | e2e 仓人工维护（进安全核；runner 只读） |
 | 评测报告 | verifier 角色 |
 | ADR / 架构文档 | architect |
 | 被测仓的规则与实现 | 各自仓的角色流程 |

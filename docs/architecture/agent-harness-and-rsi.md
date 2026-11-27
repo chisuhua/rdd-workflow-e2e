@@ -7,9 +7,10 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/harness-adr-review.md`（oracle + metis → critic；BLOCKER 已闭合） |
 | Scope | `~/.config/opencode`（治理面）× `rdd-workflow`（产品面）× `rdd-workflow-e2e`（评测面） |
-| 关联 ADR | ADR-0001 ~ ADR-0006 |
+| 关联 ADR | ADR-0001 ~ ADR-0008 |
 | 关联调研 | `docs/research/README.md`（harness / 评测 / RSI / 安全 四类） |
 | 关联 change | `backlog: harness-p0` |
+| 本次修订 | 2026-11-27：引入「**双路径**」被测维度（内置基座 + 可选 rdd skill 叠加层，**两者不互斥**）⇒ 新增主题文档 [`dual-path-model.md`](./dual-path-model.md) 与 ADR-0007 / ADR-0008。**P2 挂起条件与既有 gate 一律不变** |
 
 > 命名说明：本文用 **O/E/R（观测 / 评测 / 改进）** 指代 harness 三层，**不复用** `docs/known-gaps-and-ownership.md` 里的 L1/L2/L3（那三个字母指测试层：单元 / 运行时 / 跨阶段 E2E）。
 
@@ -19,13 +20,14 @@
 
 1. **可观测**：一次委托做了什么、错了没有、花了多少，散落在 session DB、NDJSON、`.rddf` 状态文件里，没有统一视图。
 2. **可改进**：失败模式无法系统归因，规则与 prompt 的修改靠人工直觉，没有回归保护。
+3. **两个载体混为一谈**（2026-11-27 修订新增）：实际有**两个载体**参与 planner / builder —— `~/.config/opencode` 的**内置角色矩阵**（治理面基座：权限边界 / 审查配对 / 越权处理 / 非交互停机兜底）与 `rdd-workflow` 的 **rdd skill 层**（产品面阶段合同：工件归属 / 状态机 / gate / 归档）。⚠ 二者**不互斥**（skill 层的 agent 仍在读内置角色矩阵）⇒ 真问题是「**哪个阶段由谁承担**」，不是「选哪条流程」。当前 O 层按 opencode 的 `agent` 切片，看不见流程归属；E 层任务集也没有「同一任务两种配置」的配对结构 ⇒ **两个载体都拿不到持续改进所需的证据**。模型与归属见 [`dual-path-model.md`](./dual-path-model.md)，决策见 ADR-0007 / ADR-0008。
 
 ## 2. 分期（本期只做 O 层）
 
 | 期 | 内容 | 立项条件 |
 |---|---|---|
 | **P0（本期）** | **O 层观测**：离线快照 + 指标脚本 + 可复算报告 | 立即 |
-| P1（下期） | E 层评测：trace 合同、delegate outcome 持久化、capability 集 | P0 指标暴露出现有字段回答不了的具体问题 |
+| P1（下期） | E 层评测：trace 合同、delegate outcome 持久化、capability 集；**+ 双路径对照**（capability 的首个 case 族：同一任务**多臂**配对 —— W1↔W2 主比较 + W0 参照；臂标签只由 runner 持有） | P0 指标暴露出现有字段回答不了的具体问题 |
 | P2（挂起） | R 层限域 RSI：proposals、A/B、回滚 | capability 正式集 ≥ 30 条，且连续 4 周中至少 3 周有夜间报告被引用进 improvement notes 或 ADR context（可 grep） |
 
 P0 的成功判据：**过去 5 周按 agent/项目的成功率、工具错误率、成本、Top 失败模式**，且同一份快照重跑必得同数。
@@ -46,7 +48,7 @@ P0 的成功判据：**过去 5 周按 agent/项目的成功率、工具错误�
 
 | 源 | 规模 | 用途 |
 |---|---|---|
-| `opencode.db` | 1,828 sessions / ~129k messages / 137k tool parts | 主力语料：任务、轨迹、成本、结果 |
+| `opencode.db` | 1,854 sessions / ~129k messages / 137k tool parts | 主力语料：任务、轨迹、成本、结果（口径见 `docs/research/08-p0-findings-and-writeback.md`） |
 | `storage/session_diff` | 521 个文件 | 文件级改动事实（需先核对空文件比例） |
 | e2e 运行时 NDJSON | 70 个 json + meta | 契约断言证据 |
 | `.rddf` 留痕 | events 20 / event-log 1 / bypass 2 / trace 523 | 门禁与绕过事件（量小，只作补充） |
@@ -55,7 +57,7 @@ P0 的成功判据：**过去 5 周按 agent/项目的成功率、工具错误�
 ### 4.2 采集方式
 
 1. **离线快照**：对 `opencode.db` 做文件级拷贝 + SHA256，所有批量查询在快照上执行；live 库只做 `sqlite3 -readonly` 抽样复核。
-2. **公式即规格**：指标公式写死在 `harness/metrics/` 代码里，每条指标带 `metric_id`、分子/分母、边界处理；代码即定义。
+2. **公式即规格**：指标公式写死在 `harness/metrics.py` 代码里，每条指标带 `metric_id`、分子/分母、边界处理；代码即定义。
 3. **manifest**：每次运行写 `runs/run-manifest.json`，P0 使用 `kind=metrics` 子集 `{snapshot_sha256, metrics_version, metrics_sha, generated_at, tool_version, granularity}`；字段定义见 ADR-0005 §3。
 
 ### 4.3 指标定义（摘要）
@@ -78,6 +80,7 @@ P0 的成功判据：**过去 5 周按 agent/项目的成功率、工具错误�
 |---|---|---|---|
 | 直接可算 | 成功率、成本、token、时延、工具错误率、写目标分布、委托深度 | session DB | 趋势与归因 |
 | 需补落盘（P1） | 委托 outcome、critic verdict、verifier verdict | delegate 收尾 / 判定输出 | 正确性信号 |
+| 需补落盘（P1） | **按臂（arm）切片**：各臂的**任务层**产物达成率 + 逐任务翻转数（流程层合规指标分列，不合成） | runner 侧臂索引 + 任务层 oracle | 双路径对照（**只适用于 runner 执行的新评测，不回溯历史会话** —— 历史会话无臂标签；ADR-0008） |
 | 暂不可得 | 假绿率、长期 CI 趋势 | mutation 运行 / GitHub API | 后续补齐 |
 
 ## 5. E 层（评测，P1）
@@ -138,16 +141,11 @@ capability 集 < 50 条前**手动切分**，不做滚动窗口；之后改为�
 
 > 白名单 ≠ 可写：RSI 进程的写集在工具层被限制为 `proposals/`；任何安全核路径的落地只能以 proposal 形式经人审合并。
 
-安全核是 **`harness/safety-core.manifest`**（glob + 每项理由 + 版本），不是抽象名词。覆盖：
+安全核是 **`harness/safety-core.manifest`**（glob + 每项理由 + 版本），不是抽象名词。
 
-- `~/.config/opencode/{opencode.jsonc, AGENTS.md, subagent-contract.json}`
-- `~/.config/opencode/prompts/**`（含 `<!-- capability:` / `<!-- role-class-write-set:` 机读块）
-- `~/.config/opencode/lib/{role-policy, role-lease, role-identity, commit-gate, push-gate, subagent-contract-core, delegate-core, delegate-async}.ts`
-- `~/.config/opencode/{plugins,scripts}/**` 中与角色/委托/门禁相关的文件
-- `rdd-workflow/skills/rdd-verifier/**` 与其 gate 脚本、`.rddf/state` schema
-- `rdd-workflow-e2e/tests/**`、`KNOWN_FAILURES.txt`、`scripts/report_regression.sh`、`.github/workflows/**`
-- manifest 自身：其哈希固定在 `harness/safety-core.sha256`（受版本控制）；夜间/CI 校验该文件，改动它本身需走人审 PR。
-- prompt 内机读块：`<!-- capability:` / `<!-- role-class-write-set:` 任一非空改动 ⇒ 自动归为等效权限变更，必须逐行人审。
+> **唯一真源**：安全核清单**只在该 manifest 里定义**，本节不复述 glob（ADR-0006 决策 1.4：「一份 manifest、两处引用，不允许两处定义」）。清单覆盖的类别为：治理面配置与 prompt（含 `<!-- capability:` / `<!-- role-class-write-set:` 机读块）、治理面机制面（`lib/**` / `plugins/**`）、被测仓的判据与门禁资产（`rdd-workflow` 的 gate 脚本与 `.rddf/state` schema）、本仓的判据资产（指标定义、oracle 定义、评测定义与 rubric、期望归属声明）、本仓的回归面（`tests/**`、`KNOWN_FAILURES.txt`、CI 工作流）、以及 manifest 自身（哈希固定在 `harness/safety-core.sha256`，夜间/CI 校验，改动需人审 PR）。
+>
+> ⚠ 2026-11-27 增补（ADR-0004）：`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`（叠加层的工件归属与阶段契约载体）与 `harness/path-config.yaml`（期望归属声明）进 manifest。**臂索引 `arms/` 不进安全核** —— 它是 runner 产出的运行数据（写者唯一性见 ADR-0001 决策 4，对 solver 不可读见 ADR-0006 §1）。
 
 **enforcement**：RSI 进程的写集在工具权限层限制为 `proposals/`；安全核扫描失败即拒绝合并并留痕，不依赖提案者自觉。
 
@@ -168,6 +166,10 @@ capability 集 < 50 条前**手动切分**，不做滚动窗口；之后改为�
 | `.rddf` 留痕使用率低 | 数据饥饿 | 不依赖 feedback 作主数据源 |
 | 假绿无自动化 | RSI 会磨平判据 | P1 起纳入 mutation 抽样；P0 只测 `skip_rate` 与恒真检查 |
 | 跨仓治理变更 | 旧拍板「只记录不动 opencode 仓」 | P1 的 delegate 持久化需用户批准并记录；P0 不触碰宿主 |
+| **无臂（arm）维度** | O 层只能按 opencode `agent` 切片，看不出流程归属 ⇒ 双流程不可对照 | P1 引入 runner 侧臂索引（ADR-0008）；**臂标签不进 trace / DB / solver 视野** |
+| **双流程「可比落点」未定义** | 对照只能比感觉 | 已定义：**双层测量** —— 任务层（最终工作区状态 + 测试通过，各臂同分母）与流程层（各自合规，不跨臂比），见 [`dual-path-model.md`](./dual-path-model.md) §3 |
+| **内置路径无机械 oracle** | 内置臂若只断模型措辞 ⇒ 违反断言纪律 | 复用 rdd 臂已有的产物判据；内置特有面（开场报告 / 越权 / 停机）只作各自断言，**不跨流程比** |
+| **编排增量不可分解** | 只能说「叠加层有没有方向性影响」，**说不出「编排本身值多少」**（缺基线臂） | 引入 **W0 无阶段编排参照臂**（ADR-0008 决策 1）：W0 只作参照、**不进入归属决策**；P1 以参照试点进入 |
 
 ## 9. 术语对照与外部依据
 
@@ -177,6 +179,8 @@ capability 集 < 50 条前**手动切分**，不做滚动窗口；之后改为�
 | agent harness / scaffold | 同上 | E 层中被测的「提示 + 工具 + 环境」整体 |
 | harness engineering | LangChain（Viv Trivedy）2026-02；Thoughtworks/Fowler 2026-04 | R 层的做法与本文 O/E/R 三层的总称 |
 | Guides / Sensors × Computational / Inferential | Fowler 2026-04 | 对应我们的「规则文本约束」（Guides）与「指标反馈」（Sensors） |
+| 2 臂 A/B + Δ + 成本熔断 | Claude Code plugin eval v2.1.269+（3 runs × 2 arms，`--max-cost-usd` 熔断） | ADR-0008 的对照形态（臂只由 runner 持有） |
+| 状态型 oracle | τ-bench / τ²-bench（判**最终状态**而非输出文本） | 双路径**任务层**判据的形态（`dual-path-model.md` §3） |
 
 **外部依据**：固定模型、只改 harness，公开实验为 Terminal-Bench 2.0 **52.8 → 66.5（+13.7）**，Top 30 → Top 5（LangChain，2026-02）。评测对象是 **harness 与模型协同工作的结果**（Anthropic 定义）——本文的「改进 harness 而非模型」主张由此有独立支撑。
 
@@ -200,6 +204,7 @@ capability 集 < 50 条前**手动切分**，不做滚动窗口；之后改为�
 - 不把 harness 数据提交进 git。
 - 不替代现有 e2e 套件；harness 消费其证据，不重复实现断言。
 - 不评价模型好坏，只评价「在给定任务上的行为结果」。
+- **不做两条流程的排名式竞赛**：对照的产出是**阶段归属边界**（哪一阶段由哪条流程承担），不是一个总分或一张排行榜（ADR-0007）。
 - P0 不修改 `~/.config/opencode` 与 `rdd-workflow` 的任何运行时文件。
 
 ## 12. 关联决策
@@ -212,10 +217,13 @@ capability 集 < 50 条前**手动切分**，不做滚动窗口；之后改为�
 | ADR-0004 | RSI 写入边界与安全核 |
 | ADR-0005 | 度量、gate 与版本 pin |
 | ADR-0006（Proposed，已裁决） | 评测隔离契约（评分器不可达）：语义层 + 轻量档 P1 + 容器档触发线 |
+| ADR-0007 | 双流程的层属与改进面归属（内置 = 治理基座 / rdd-\* = 产品面阶段合同；不是同层竞品；阶段归属边界而非排名） |
+| ADR-0008 | 双路径对照的测量契约（**三级臂集合** W0 无阶段编排 / W1 内置编排 / W2 内置编排 + rdd skill；臂只由 runner 持有且不进 solver 视野；盲化 + 外部执行；**双层测量**（任务层 + 流程层）；逐任务配对；成本熔断） |
 
 ## 13. 与既有文档的关系
 
 - `docs/known-gaps-and-ownership.md`：定义测试层 L1/L2/L3 与跨仓缺口归属；本文不复用其字母。
+- `docs/architecture/dual-path-model.md`：双流程被测模型（层属、**双层测量**、臂的数据流、首批判据来源）；本文只给总纲与指针。
 - `docs/runtime-assertion-discipline.md`：断言纪律的唯一真源；ADR-0003 只引用，不复制。
 - `docs/research/**`：外部调研材料与借鉴映射（只作材料，不作判据）。
-- 本目录 `docs/adr/`：决策文档，按 ADR-0001 → ADR-0005 顺序阅读。
+- 本目录 `docs/adr/`：决策文档，按 ADR-0001 → ADR-0008 顺序阅读。

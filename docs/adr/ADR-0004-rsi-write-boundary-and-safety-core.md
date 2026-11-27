@@ -9,8 +9,9 @@
 | 外部依据 | `docs/research/02-self-improvement-and-agent-evolution.md`（RSI 失败模式）、`docs/research/03-safety-permission-and-eval-integrity.md`（沙箱与隔离契约） |
 | Parent | ADR-0001 |
 | 关联 change | `backlog: harness-p2` |
-| 分期 | **P2（挂起）**：capability 正式集 ≥ 30 条，且连续 4 周中至少 3 周有夜间报告被引用进 improvement notes 或 ADR context 后恢复 |
+| 分期 | **P2（挂起）**：capability 正式集 ≥ 30 条（**按任务计，不按臂计**，ADR-0003 决策 6），且连续 4 周中至少 3 周有夜间报告被引用进 improvement notes 或 ADR context 后恢复 |
 | AC 映射 | 暂缺（change 未立项） |
+| 本次修订 | 2026-11-27：白名单**澄清**一项（rdd skill 文档**表述**纳入，**不新增其他可提案面**）+ 确立**边界单一真源**（「生成面」= 决策 3 白名单穷举；「落地面」= 决策 2 的「经人审 + 安全核扫描」；**实现类路径禁入**）+ 安全核**新增三条 glob**（`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`、`rdd-workflow/**/_lib/**`、`harness/path-config.yaml`）。**既有语义「生成允许 / 落地强制人审」未变**；P2 恢复条件、合并 gate、安全核的判定机制均不变（指向 ADR-0007 / ADR-0008） |
 
 ## 背景与问题
 
@@ -26,7 +27,9 @@
 2. **enforcement 在工具权限层**：RSI 进程的运行写集被限制为 `proposals/`；安全核扫描失败即拒绝合并并留痕，不依赖提案者自觉。
    - **白名单 ≠ 可写**：白名单只定义「允许生成哪类提案」；任何安全核路径的落地只能以 proposal 形式经人审合并。
 3. **白名单（可自动提案，仍需人审合并）**：
-   - prompt 的表述、示例、反例（人审须判定「是否构成等效权限/配对/gate 变更」）
+   - prompt 的表述、示例、反例（人审须判定「是否构成等效权限/配对/gate 变更」）—— **表述类**；**可自动生成提案，落地强制人审**（决策 2）
+   - **rdd skill 文档（`rdd-workflow/skills/**`）的表述** —— 2026-11-27 澄清项：现文「prompt 的表述」是否覆盖 skill 文档有二义，现**显式纳入**（**仅限「表述」**；**不含** `owns` / `not_owns` 与实现机械）；**不新增任何其他可提案面**（白名单条目集合的 diff 可验）。**表述类**；**可自动生成提案，落地强制人审**（决策 2）。两类载体的人审清单**分列**（清单条目见 ADR-0007 决策 5），且两类提案**不得合并为同一条**
+   - ⚠ **边界单一真源（2026-11-27 定，供全仓引用）**：**「生成面」= 本决策 3 的白名单（穷举）**；**「落地面」= 决策 2 的规则**（安全核路径只能以 proposal 形式**经人审**合并 + 安全核扫描）。⇒ 白名单**未**显式列出的变更类型，**即使落在安全核路径内，也不得自动生成提案**；白名单**已**列出的**表述类**变更（prompt 表述 / skill 文档表述）**可以自动生成提案，但落地一律强制人审**（决策 2 —— 本次修订**未**改变这个既有语义）。⇒ 另设一条**实现类禁入**：安全核中的**实现类**路径（`_lib/**`、`harness/{metrics,criteria,eval}/**`、skill 目录下的非 `SKILL.md` 实现文件、`owns` / `not_owns` 所在的实现文件）**既不可自动生成、也不可自动落地**。ADR-0007 决策 5 的表只是**风险分类与人审清单**，**不构成新的提案面**。
    - 新增 fixture 与新增用例（只允许新增文件，不允许修改安全核清单内既有文件）
    - helper 脚本、文档
    - ADR 给定边界内的阈值参数
@@ -34,11 +37,16 @@
    - `~/.config/opencode/{opencode.jsonc, AGENTS.md, subagent-contract.json}`
    - `~/.config/opencode/prompts/**`、`lib/**`、`plugins/**`、`scripts/role-*.ts`
    - `rdd-workflow/skills/rdd-verifier/**`、gate 脚本、`.rddf/state` schema
+   - **`rdd-workflow/skills/{rdd-planner,rdd-builder,rdd-quick}/**`**（2026-11-27 新增：叠加层的**工件归属与阶段契约**载体；改其 `owns` / `not_owns` ≈ 改 single writer 声明 ⇒ 归为等效权限风险）
+   - **`rdd-workflow/**/_lib/**`**（2026-11-27 新增：**顶层 `_lib/**` 与 `skills/_lib/**` 都要覆盖** —— 后者含 `cross_repo_gate.py` / `state.sh` / `state_reader.py` / `cleanup_plan_handoff.py` / `orchestrator_entry.sh` / `post_flow_wrap.sh` 等**运行时 gate / handoff 机械**，且上游 `install.sh:155-165` 正是从 `skills/_lib/` 拷进已安装 `_lib` ⇒ 只列顶层会留下「白名单里 `rdd-workflow/skills/**` 的表述」可被解读为允许对 `skills/_lib` 自动提案的**缺口**）。改 handoff / gate 的实现机械与改 `owns` 同为等效工件归属变更 ⇒ 必须同列硬拒。
    - `rdd-workflow-e2e/tests/**`、`KNOWN_FAILURES.txt`、`scripts/report_regression.sh`、`.github/workflows/**`
    - **判据自身**：`rdd-workflow-e2e/harness/metrics/**`（指标定义与行粒度，ADR-0005 声明其为安全核）、`harness/criteria/**`（oracle 定义）、`harness/eval/**`（评测定义与 rubric）、`harness/safety-core.manifest`、`harness/safety-core.sha256`
+   - **期望归属声明**：`rdd-workflow-e2e/harness/path-config.yaml`（2026-11-27 新增：阶段归属声明 = 判据资产，ADR-0007 决策 4）
+   - ⚠ **臂索引 `arms/` 不入本清单**：它是 **runner 产出的运行数据**，不是判据资产 ⇒ 写者唯一性见 ADR-0001 决策 4，对 solver 的不可读性见 ADR-0006 §1
+   - ⚠ **清单落地时必须核对 glob 与实际布局**（2026-11-27 发现）：现文的 `harness/metrics/**` 在当前布局下**匹配不到** `harness/metrics.py`（指标定义是**单文件**，`harness/` 下为 `manifest.py` / `metrics.py` / `run.py` / `snapshot.py`）⇒ 落地 `safety-core.manifest` 时必须逐条核对，否则安全核会**漏掉指标定义文件**（与 ADR-0005「指标定义属安全核」相悖）。
    - **判据的判据**：`docs/runtime-assertion-discipline.md`（ADR-0003 指定为唯一口径）、`docs/adr/**`
    - manifest 自身：哈希固定在 `harness/safety-core.sha256`（受版本控制），夜间与 CI 都校验该文件；改动它需人审 PR。
-   - prompt 内机读块（`<!-- capability:` / `<!-- role-class-write-set:`）：任一非空改动 ⇒ 自动归为等效权限变更，逐行人审。
+   - prompt 内机读块（`<!-- capability:` / `<!-- role-class-write-set:`）：任一非空改动 ⇒ 自动归为等效权限变更，逐行人审。⚠「**自动**归为」指**人审流程内的自动分类**，**不是**「自动生成提案」。
 5. **合并前置条件**（缺一不可）：
    - **A/B 结论只作方向性**：capability 集规模 × N 的分辨率 **> 5pp 期间**（尚不能分辨 5pp 时），Δ 不得作为合并依据；数值与阈值以 ADR-0005 §4 为唯一真源；
    - contract 层 0 新增失败，skip 数不超过基线；

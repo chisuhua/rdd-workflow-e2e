@@ -10,6 +10,7 @@
 | 关联 change | `backlog: harness-p1` |
 | 分期 | **P1**（P0 只做 session DB 指标，不实施本 ADR） |
 | AC 映射 | 暂缺（change 未立项） |
+| 本次修订 | 2026-11-27：决策 2 下增一条**刻意缺省**说明（臂标签不进 trace）。**字段表与既有决策一律不变** |
 
 ## 背景与问题
 
@@ -28,6 +29,7 @@
    - **unit 的推导规则**（P1）：`round_index` 从 **0** 开始；在每次「`idle` 之后的 `user` 消息」处递增；首个 `idle` 之前不产生独立 unit；resume 产生新 unit 并通过 `resume_of` 关联。
    - 实测 `session_message.type` 已包含 `model-switched`（992 条）与 `agent-switched`（592 条），可直接填充 `model_switches` / `agent_switches`，不需要额外埋点。
 2. **定义 `trace_version: 1`**，一个 unit 一行 NDJSON。
+   - **2026-11-27 增补（刻意缺省，勿补）**：**臂标签不进 trace**（ADR-0008 决策 2）—— 被测进程不得持有臂标签（否则可自报 / 可被污染）；臂索引由 runner 独占写（ADR-0001 决策 4），经 `session_id ↔ run_id ↔ arm` 与 trace 关联。
 3. **必填字段**：
 
 | 组 | 字段 |
