@@ -1,0 +1,8 @@
+schema: spec-driven
+created: 2026-11-27
+goal: 双路径对照就绪 —— 归属声明、安全核清单、ADR-0006 §5 隔离判定 memo、遮蔽探针、W0 prompt 副本、臂索引 writer、eval manifest 扩展、cap 集首族 case、判据审计试点（本期不跑真模型）
+affected_areas:
+  - harness/eval
+  - harness/path-config.yaml
+  - harness/safety-core.manifest
+skip_specs: true
