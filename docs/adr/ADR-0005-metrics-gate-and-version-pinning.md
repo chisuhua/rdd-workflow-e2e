@@ -10,8 +10,8 @@
 | 后审补写 | 2026-11-20：P0 实测回写「未知率 / 错误类别分布 / 执行失败率」三条指标（未经 critic 复审，理由与证据见 `docs/research/08-p0-findings-and-writeback.md`） |
 | Parent | ADR-0001 |
 | 关联 change | `backlog: harness-p0`（指标定义与 manifest）；`backlog: harness-p1`（gate 与夜间） |
-| AC 映射 | 暂缺（change 未立项） |
-| 本次修订 | 2026-11-27：`kind=eval` manifest 增 `manifest_version`、`path_config_version`、`arms_index_sha256`、`budget_usd`、`cost_usd_actual`（共 14 字段）+ 字段演进规则 + `prompt_version` 多臂并集口径 + 归属修订的四元组回滚集。**指标定义、分母口径、gate 语义一律不变**（指向 ADR-0007 / ADR-0008） |
+| AC 映射 | change-1（`openspec/changes/archive/2026-11-27-harness-p1/`）的 **AC-13**（`kind=eval` manifest 14 字段 ⇒ 覆盖 §3 字段表与四元组回滚集）· **AC-15/AC-16**（§1 `judge_defect_rate` / `false_negative_rate` / 审计覆盖率的分母与抽样口径）· **AC-14 + pilot-002/003**（§1 恒真检查的 harness case 判别力面 ⇒ 本次澄清是**回填既有事实**，不改判据）。**未覆盖**：§2 分层 gate 的运行侧、§4 统计与预算、§5 假绿监控的阈值告警（需 runner 与夜间） |
+| 本次修订 | 2026-11-27：`kind=eval` manifest 增 `manifest_version`、`path_config_version`、`arms_index_sha256`、`budget_usd`、`cost_usd_actual`（共 14 字段）+ 字段演进规则 + `prompt_version` 多臂并集口径 + 归属修订的四元组回滚集。**指标定义、分母口径、gate 语义一律不变**（指向 ADR-0007 / ADR-0008）；同日（2026-11-27）**恒真检查行新增「两模型」适用口径澄清**（见 §1 该行）—— 澄清的是**适用口径**，未改公式、未改行粒度、未改任何阈值 ⇒ **gate 语义与分母口径不变**；`metrics_version` **不变**（判据口径澄清未落到公式层，恒真检查尚无实现 ⇒ 无实现漂移；若后续实现该指标，再随实现升版） |
 
 ## 背景与问题
 
@@ -46,7 +46,7 @@ P0 的成功判据是「指标可复算」，因此本 ADR 的第一要务不是
 | 假阴性率 | `false_negative_rate` = 合法解被判失败的次数 / 合法解尝试次数（用 reference solution 与替代正确解构造）。这是唯一能惩罚「判据过严」的指标 |
 | 作弊率 | `cheating_attempt_rate` = 识别到的作弊 attempt 数 / 总 attempt 数；**识别到的作弊一律计为失败**（METR 口径）。检测机制须写明（人工抽检 / 规则拒绝 / 判据审计发现），三者可并列 |
 | skip 率 | `skipped / total cases`；gate 读四元组 `executed/pass/fail/skip` |
-| 恒真检查 | fixture 初始必须绿；初始红即判该用例无效。**⚠ 两种模型须区分（2026-11-27 澄清）**：① **运行时用例模型**（本条原文的语境）fixture = **前提**，初始绿才有效；② **harness case 模型**（`harness/criteria/cases/*.json`，本仓 E 层判据）fixture = **起点**，初始**必须红** —— 否则「什么都不做」就是合法解 ⇒ 判据恒真；该模型另配「不做任何动作 ⇒ 判据必须红」的**判别力检查**，reference 解之后才绿。**两模型的判据口径不同，但都不放宽恒真/恒红防线** |
+| 恒真检查 | fixture 初始必须绿；初始红即判该用例无效。**⚠ 两种模型须区分（2026-11-27 澄清）**：① **运行时用例模型**（本条原文的语境）fixture = **前提**，初始绿才有效；② **harness case 模型**（`harness/criteria/cases/*.json`，本仓 E 层判据）fixture = **起点**，初始**必须红** —— 否则「什么都不做」就是合法解 ⇒ 判据恒真；该模型另配「不做任何动作 ⇒ 判据必须红」的**判别力检查**，reference 解之后才绿。**两模型的判据口径不同，但都不放宽恒真/恒红防线**。**（两模型共同的第二腿**：「前提 / 基线本身要被验证」—— 见 ADR-0003 决策 2 → `docs/runtime-assertion-discipline.md` 纪律 2；harness case 的 negative oracle 基线缺失即恒真，`harness/criteria/oracle.py` 直接抛错。**该腿与 fixture 语义无关，两模型同适用**。）**（模型归属可机判**：校验须**按用例族分派**（运行时用例族走模型 ①、harness case 族走模型 ②）；`harness/eval/taskset.py` 的 registry 同时暴露两族 ⇒ **不得**在 registry 层做统一的「初始绿/红」判定。）** |
 | oracle 变异命中率 | 改坏受约束要素后必须红；命中率低于阈值即告警（原名「假绿率」，拆为上述三项） |
 
 指标定义与行粒度都属于安全核：只能人改，且每次修改升 `metrics_version`。

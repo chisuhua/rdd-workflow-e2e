@@ -7,9 +7,9 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/dual-path-adr-review.md`（metis → oracle 2 轮 → critic 3 轮；末轮 **APPROVE**（`mergeable: yes`），BLOCKER 已闭合） |
 | Parent | ADR-0002（trace 合同）、ADR-0003（评测分层与准入）、ADR-0005（度量与 gate）、ADR-0006（隔离契约）、ADR-0007（层属与归属） |
-| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（**change-1：遮蔽探针 / W0 副本 / 臂索引 / eval manifest / cap 首族 / 判据审计，已实施并归档**）+ `backlog: harness-p1`（change-2：E 层主体与对照 run） |
-| AC 映射 | change-1 的 **AC-1..AC-17**（逐条判定 + 证据见 `.rddf/reviews/harness-p1-verify.md`）；本 ADR 的 **run 级判据**（join 命中率 / 翻转数 / 成本熔断 / 臂序断言 / 报告结构 / 跨臂 Δ）**全部未覆盖** ⇒ 需 runner 与真模型 run（另立 change），逐条列于本文「推迟清单」 |
-| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；2026-11-27 补充：用户裁决「以改进提案为裁决载体」⇒ change-1（`harness-p1`）已实施并归档（17/17 AC 通过 · 判据审计 pilot-001/002/003 三轮闭合 · ADR-0006 §5 隔离判定 memo 已由独立会话签署）；**Status 维持 `Proposed`**（用户未就 ADR 本身明示签批） |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（**change-1：遮蔽探针 / W0 副本 / 臂索引 / eval manifest / cap 首族 / 判据审计，已实施并归档**）+ `backlog: harness-p1`（change-2：E 层主体与对照 run）（对照 run 的开工前置：memo 硬门 (i)(ii)(iii)，见裁决记录行） |
+| AC 映射 | 本 ADR 的 **run 级判据全部未覆盖**；**静态资产类已覆盖**（change-1 的 AC-7..AC-13：遮蔽探针 / 臂索引五字段 / eval manifest / W0 副本 / 路径可达性探针）。run 级项（join 命中率 / 翻转数 / 成本熔断 / 臂序断言 / 报告结构 / 跨臂 Δ）⇒ 需 runner 与真模型 run（另立 change），逐条列于**归档 change 的「推迟清单」**（`openspec/changes/archive/2026-11-27-harness-p1/proposal.md` §推迟清单）与 `.rddf/improvements/harness-p1.md` §推迟清单。 |
+| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成、BLOCKER 闭合；2026-11-27 补充：用户裁决「以改进提案为裁决载体」⇒ change-1（`harness-p1`）已实施并归档（**17/17 AC 通过**（编号以 `.rddf/reviews/harness-p1-verify.md` 为准）· 判据审计 pilot-001/002/003 **三轮闭合，但 frame 仅含本 change 新增的 3 条 cap 用例**（pilot-001 的 7 条存量 CS 用例缺陷仍欠、属既有测试套件 ⇒ **若并入同一 frame 则 7/10 = 0.7 > 0.10、扩量仍冻结**，两口径不得混用）· ADR-0006 §5 隔离判定 memo **已由独立会话签署，但结论为「修正 → 条件式」**：轻量档仅在**补足路径 (a) 落地并通过探针验证**的前提下足够；**开工前硬门 (i)(ii)(iii)** 中 (i) 臂索引不可读 + 不可写的隔离手段、(ii) 每 trial 前 `.rddf/state/**` 存在性断言**尚未落地 ⇒ 对照 run 仍不得开工**）；**Status 维持 `Proposed`**（用户未就 ADR 本身明示签批） |
 | 外部依据 | `docs/research/01-harness-and-eval-engineering.md`（plugin eval：2 臂 × 3 跑 + Δ + `--max-cost-usd` 熔断；τ-bench 状态型 oracle）、`docs/research/02-self-improvement-and-agent-evolution.md` §B3.6（沙袋 ⇒ 外部执行 + 盲化）、§B3.8（配对口径、翻转数、「同分但行为不同」拒收） |
 
 ## 背景与问题
