@@ -7,9 +7,9 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/harness-adr-review.md`（oracle + metis → critic；BLOCKER 已闭合） |
 | Parent | ADR-0001 |
-| 关联 change | `backlog: harness-p1` |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：cap 首族 case + 100% 判据审计）+ `backlog: harness-criteria-prompt`（任务集与 prompt 契约，**待立项**） |
 | 分期 | **P1**（P0 只做观测指标，不建评测集） |
-| AC 映射 | 暂缺（change 未立项） |
+| AC 映射 | change-1 的 **AC-14**（cap 首族 case：reference 通过 / 替代正确解通过 / 变红演练 / case 定义不可达）+ **pilot-001/002/003**（100% 审计、`auditor ≠ author`）覆盖决策 3 的七条。**未覆盖**：决策 3 的「每 trial 干净环境」「case 变更后重跑变红」· 决策 8 的四元组 gate · Verification「contract 层在无模型无网络的 CI 中可执行」⇒ 属 `harness-criteria-prompt` 与对照 run change |
 
 ## 背景与问题
 
@@ -37,7 +37,7 @@
    - 有机械 oracle（禁止「模型说做完了」）；
    - **有 reference solution 且它通过该 oracle**（不是「存在」）；
    - **替代正确解（不同工具序列）也必须通过**（防 oracle 过窄）；
-   - 有一次变红演练记录；**case 或其 oracle 每次变更后必须重跑变红**；
+   - 有一次变红演练记录；**case 或其 oracle 每次变更后必须重跑变红**（**harness case 模型**下另有对称要求：**不做任何动作 ⇒ 判据必须红**，见 ADR-0005 §1 恒真检查的两模型；本条**只回指，不新增准入**）；
    - **每 trial 干净环境**（显式断言无跨 run 共享状态：`HOME`、opencode session 目录、git 历史、`TMPDIR`、工作区；**2026-11-27 增补**：`.rddf/state/**` 与**叠加层的全部可达面**（四类对象：rdd-* per-skill 软链 / `_lib` 与 `rdd-workflow` 软链 / `~/.local/bin/rddf` wrapper / `PYTHONPATH` 与 `RDD_WORKFLOW_REPO` 注入 —— 清单以 ADR-0008 决策 6 的表为准）—— 否则上一 trial 的阶段状态与「skill 是否真的被遮蔽」会泄漏进下一 trial）；
    - **case 定义对被测 solver 不可达**（路径探针，不用 grep）；
    - 有 oracle 审计记录 `{case_id, oracle_sha, auditor, author, defects[], verdict, date}`，且 `auditor ≠ author`。

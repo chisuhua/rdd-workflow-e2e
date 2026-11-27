@@ -6,9 +6,9 @@
 | Date | 2026-11-19 |
 | Author | architect |
 | Parent | ADR-0004（不可写集声明）、ADR-0002（trace 合同） |
-| 关联 change | `backlog: harness-p1` |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：§1 不可读集与 §5 判定 memo）+ `backlog: harness-criteria-prompt`（§1.4 清单同源修复）+ 对照 run change（轻量档四项机制与每 trial 断言） |
 | 分期 | **语义层现在生效**；**轻量档** P1；**容器档** 待触发线（见 §5） |
-| 裁决记录 | 用户 2026-11-19 接受（默认轻量路径） |
+| 裁决记录 | 用户 2026-11-19 接受（默认轻量路径）。**2026-11-27 补充**：§5 判定 memo 已由独立会话签署，结论 **「修正 → 条件式」**（轻量档仅在补足路径 (a) 落地并通过探针验证的前提下足够；硬门 (i)(ii)(iii) 中 (i) 臂索引的隔离手段、(ii) 每 trial 前 `.rddf/state/**` 断言**尚未落地** ⇒ 对照 run 仍不得开工）⇒ 见 `.rddf/reviews/adr-0006-isolation-verdict.md` |
 | 本次修订 | 2026-11-27：不可读集**增补**臂索引与期望归属声明（引用 ADR-0001 / ADR-0007 / ADR-0008，不复制条款）+ §5 补判定（双路径对照**已踩触发线 (a)** ⇒ P1 开工前须判定轻量档是否足够）。**两档强度、触发线清单、语义层条款本身不变** |
 | 外部依据 | `docs/research/03-safety-permission-and-eval-integrity.md`、`docs/research/04-observability-and-trail-contracts.md` |
 | 审稿报告 | `.rddf/reviews/harness-adr-review.md`（第 3 轮，用户批准） |

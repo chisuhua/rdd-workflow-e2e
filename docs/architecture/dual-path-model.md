@@ -6,9 +6,9 @@
 | Date | 2026-11-27 |
 | Author | architect |
 | 性质 | **架构主题文档**：当前态模型与模块关系。**决策不在本文** —— 层属与改进面在 ADR-0007，测量契约在 ADR-0008 |
-| 关联 change | `backlog: harness-p1`（对照 case 族、臂索引与归属声明的实现） |
+| 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：归属声明 / 探针 / 臂索引 / 判据审计，**已归档**）+ `harness-trace`（已立项）· `harness-criteria-prompt` / `harness-report` / `harness-dual-path-run`（待立项） |
 | 审稿报告 | `.rddf/reviews/dual-path-adr-review.md`（metis → oracle 2 轮 → critic 3 轮；末轮 **APPROVE**（`mergeable: yes`），BLOCKER 已闭合） |
-| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成；**Status 维持 `Proposed`，待用户裁决** |
+| 裁决记录 | oracle 2 轮（末轮 APPROVE）+ critic 3 轮（末轮 APPROVE）⇒ 双审完成；**2026-11-27 补充**：用户裁决「以改进提案为裁决载体」⇒ change-1 已实施并归档（17/17 AC；判据审计三轮闭合但 frame 仅含 3 条新增 cap 用例；ADR-0006 §5 memo 为「修正 → 条件式」）；**Status 维持 `Proposed`** |
 | 证据来源 | 本仓 O 层实测（快照 `c4f1e85c…`，2026-10-12 → 2026-11-19，1,854 sessions）；`tests/integration/**` 现有用例；`docs/research/**` 外部材料 |
 
 ## 1. 为什么需要这个模型

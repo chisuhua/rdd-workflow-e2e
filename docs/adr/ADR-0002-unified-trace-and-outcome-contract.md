@@ -7,9 +7,9 @@
 | Author | architect |
 | 审稿报告 | `.rddf/reviews/harness-adr-review.md`（oracle + metis → critic；BLOCKER 已闭合） |
 | Parent | ADR-0001 |
-| 关联 change | `backlog: harness-p1` |
+| 关联 change | `backlog: harness-trace`（trace 投影；此 change **已立项、未实施**）。⚠ change-1（`harness-p1`，已归档）**不涉及** trace 合同 ⇒ 本 ADR 无已归档 change 覆盖 |
 | 分期 | **P1**（P0 只做 session DB 指标，不实施本 ADR） |
-| AC 映射 | 暂缺（change 未立项） |
+| AC 映射 | **未覆盖**：trace 投影的 AC 全在 `harness-trace`（已立项）。**跨仓 blocked**：`traces/delegate-<session>.jsonl` 存在性 / outcome 字段组 / delegate 写失败告警三项属 `~/.config/opencode`（ADR 决策 4 明写「本期不得默认开工」） |
 | 本次修订 | 2026-11-27：决策 2 下增一条**刻意缺省**说明（臂标签不进 trace）。**字段表与既有决策一律不变** |
 
 ## 背景与问题
