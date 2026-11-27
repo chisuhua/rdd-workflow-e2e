@@ -1,0 +1,9 @@
+schema: spec-driven
+created: 2026-11-27
+goal: unit trace 投影（ADR-0002 合同落地）—— 从 session DB 投影 unit trace、unit 切分与选择器、脱敏与完整性指标、粒度断点；不跑真模型，跨仓运行时 trace 明确 blocked
+affected_areas:
+  - harness/trace.py
+  - harness/run.py
+  - harness/manifest.py
+  - harness/safety-core.manifest
+skip_specs: true

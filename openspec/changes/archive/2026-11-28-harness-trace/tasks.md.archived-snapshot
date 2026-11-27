@@ -1,0 +1,10 @@
+## Tasks
+
+- [x] ### Task 1: 骨架 + unit 切分（round_index / resume_of）
+- [x] ### Task 2: 字段表 + `project`（blocked 字段 null / `trace_incomplete` 四类判定）
+- [x] ### Task 3: 幂等（逐字节一致）与 NDJSON 写出
+- [x] ### Task 4: 单元选择器（纯函数）
+- [x] ### Task 5: 脱敏（JWT / Basic / `.netrc`）+ `HARNESS_KEEP_PROMPTS`
+- [x] ### Task 6: `torn_lines`（截断末行）
+- [x] ### Task 7: 完整性指标（三率 + >5% 告警）+ 粒度断点 + `metrics_version` 升版
+- [x] ### Task 8: 空输入 / 缺列降级 + 安全核清单登记 + 全量自测
