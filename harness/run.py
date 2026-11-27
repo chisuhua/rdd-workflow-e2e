@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import METRICS_VERSION, TOOL_VERSION
 from .metrics import compute
+from . import trace as trace_mod
 from .snapshot import create_snapshot
 from . import manifest as manifest_mod
 
@@ -127,6 +128,12 @@ def render_report(metrics: dict, manifest: dict) -> str:
     out.append(f"- JSON 解析失败：{metrics['parse_errors']}")
     out.append(f"- tool_version：`{manifest['tool_version']}` / metrics_version：`{METRICS_VERSION}`")
     out.append("")
+
+    # 行粒度断点（ADR-0002 决策 1 / ADR-0005 行粒度）：P0 按 session，P1 起按 unit
+    out.append("## 行粒度断点")
+    out.append("")
+    out.append(f"- 本报告 `granularity = \"{manifest.get('granularity', 'session')}\"`；{trace_mod.GRANULARITY_NOTE}")
+    out.append("")
     return "\n".join(out)
 
 
@@ -154,6 +161,28 @@ def _emit(snap_path: Path, sha: str, out: Path) -> int:
     print(f"▶ deterministic: {deterministic}")
     print(f"▶ report: {run / 'report.md'}")
     return 0 if deterministic else 1
+
+
+def cmd_trace(args) -> int:
+    """unit trace 投影（ADR-0002）：写 NDJSON + 输出三项完整性指标。
+
+    ⚠ 本 change 期间运行时 outcome 字段组被跨仓阻塞 ⇒ `trace_incomplete` 率恒为 100%，
+    「> 5% 告警」是**真实信号**（trace 尚不完整），不是回归。
+    """
+    snapshot = Path(args.snapshot).expanduser()
+    run_dir = _run_dir(Path(args.out).expanduser()) if args.run_dir is None else Path(args.run_dir)
+    units = trace_mod.project(snapshot)
+    trace_path = trace_mod.write_ndjson(units, run_dir / "trace.jsonl")
+    report = trace_mod.completeness(units, torn_lines=trace_mod.count_torn_lines(trace_path))
+    (run_dir / "trace-completeness.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"▶ trace: {trace_path}（{len(units)} units）")
+    print(f"▶ trace_incomplete_rate: {report['trace_incomplete_rate']:.4f}"
+          f"{'  ⚠ 超过 5% 阈值' if report['warn'] else ''}")
+    print(f"▶ torn_lines: {report['torn_lines']} · cost_coverage: {report['cost_coverage']:.4f}")
+    print(f"▶ granularity: {report['granularity']}（{trace_mod.GRANULARITY_NOTE}）")
+    return 0
 
 
 def cmd_snapshot(args) -> int:
@@ -208,6 +237,12 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--snapshot", required=True)
     pr.add_argument("--out", default=DEFAULT_OUT)
     pr.set_defaults(func=cmd_report)
+
+    pt = sub.add_parser("trace")
+    pt.add_argument("--snapshot", required=True)
+    pt.add_argument("--out", default=DEFAULT_OUT)
+    pt.add_argument("--run-dir", default=None)
+    pt.set_defaults(func=cmd_trace)
 
     pa = sub.add_parser("all")
     pa.add_argument("--db", default=DEFAULT_DB)

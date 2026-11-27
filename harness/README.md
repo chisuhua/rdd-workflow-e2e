@@ -56,6 +56,39 @@ runs/<UTC-stamp>/
 - 子会话的「成功率」按自身 `idle_outcome` 统计，与根簇率是不同口径。
 - `cost` 在订阅型 provider 下可能为 0，`cost_coverage` 只反映「字段非空」而非「真实计费」。
 
+## unit trace 投影（P1 / ADR-0002 合同）
+
+把 P0 的「session 粒度」升级为 **unit 粒度**（`(session_id, round_index)`，一行 NDJSON）。
+
+```bash
+# 从离线快照投影 unit trace（默认落 ~/.local/share/rddf-harness/runs/<ts>/trace.jsonl）
+python3 -m harness.run trace --snapshot ~/.local/share/rddf-harness/snapshots/<sha>.db
+```
+
+**产出的三项完整性指标**（写 `trace-completeness.json`，同时打印）：
+
+| 指标 | 含义 |
+|---|---|
+| `trace_incomplete_rate` | 不完整的 unit 占比；**> 5% 告警**（ADR-0002 决策 6，恰好 5% 不告警） |
+| `torn_lines` | 截断末行的行数（末行非法 JSON **且** 文件不以换行结尾） |
+| `cost_coverage` | 有 `cost` 值的 unit 占比 |
+
+**行粒度断点（必读）**：本报告 `granularity = "unit"`；**P0（session）与 P1（unit）的趋势不可拼接**
+（ADR-0002 决策 1 / ADR-0005 行粒度）⇒ `metrics_version` 已升 `p0-metrics-v3`，既有基线需分段看。
+
+**完整性判定的四类来源**（写死在 `harness/trace.py`，可单测）：
+`outcome-blocked`（跨仓运行时字段被我方置空）· `json-parse-error` · `unknown-message-type` ·
+`no-messages` / `missing-<列名>`（关键 session 列缺失）。
+
+⚠ **本 change 期间 `trace_incomplete` 率恒为 100%**：运行时的 `outcome` 字段组仍被跨仓阻塞
+（`~/.config/opencode`，需单独获批）⇒ 「> 5% 告警」是**真实信号**（trace 尚不完整），**不是回归**。
+
+**脱敏**：默认只落 `prompt_hash`（不落原文）；JWT / Basic auth / `.netrc` 会被替换为 `[REDACTED:<类>]`。
+需要原文时显式 `HARNESS_KEEP_PROMPTS=1`（**只写本地**）。
+
+**落点**：`runs/<ts>/trace.jsonl`。⚠ 这与 ADR-0002 决策 4 的 `traces/delegate-<session>.jsonl`
+**不是同一个东西** —— 后者是跨仓运行时的产物，本仓不产出。
+
 ## 关联
 
 - ADR-0001（数据面与归属）、ADR-0002（trace 合同，P1）、ADR-0005（指标口径）
