@@ -103,6 +103,12 @@ ADR-0002 已经把 trace 合同写死（字段表 / `trace_version` / 演化规�
 | 4 | `harness-report` | **对照报告生成器**（ADR-0008 的报告类 12 条：四类翻转数 / `excluded_*` 计数与占比 / 分母分列 / 流程层三类取值 / 安全不变量判红 / `taskset_size` 与 `cases` 对账 / `partial` 不含 Δ 字段 / 键集合层无总分）+ **输入 fixture schema** | change-3 | 待立项 |
 | 5 | `harness-dual-path-run` | 对照 run（三臂）+ runner + **轻量档隔离与臂索引的作用范围扩展**（ADR-0006 §5 memo 硬门 (i)(ii)(iii) 的门控对象即本 change）+ 每 trial 前 `.rddf/state/**` 断言 | change-2/3/4 | 待立项 |
 
+> ⚠ **本表已被后续拆分取代**：`harness-criteria-prompt` 立项时按 metis 的 P0 意见再拆出
+> `harness-isolation-samesource`（隔离清单同源 + manifest 第三 scope + 路径锚点化 + `masking` CLI 修复，
+> **前置是 architect 修订 ADR-0006 §1.4 / ADR-0004 决策 4**）⇒ **唯一真源改为
+> `.rddf/improvements/harness-criteria-prompt.md` 的「拆分后的 change 序列」**（6 段）。本表保留作历史记录。
+
+
 ⚠ **change-4/5 依赖真模型与预算** ⇒ 单独立项、独立审批预算；本仓至今未批过任何真模型预算。
 
 ## metis 结论（1 轮；审查对象是本 change 的**母稿**「E 层主体」四子系统稿）
