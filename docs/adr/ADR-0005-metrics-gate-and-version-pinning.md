@@ -9,9 +9,9 @@
 | 外部依据 | `docs/research/01-harness-and-eval-engineering.md`（统计与成本口径）、`docs/research/03-safety-permission-and-eval-integrity.md`（判据缺陷与作弊） |
 | 后审补写 | 2026-11-20：P0 实测回写「未知率 / 错误类别分布 / 执行失败率」三条指标（未经 critic 复审，理由与证据见 `docs/research/08-p0-findings-and-writeback.md`） |
 | Parent | ADR-0001 |
-| 关联 change | `backlog: harness-p0`（指标定义与 manifest）；`backlog: harness-p1`（gate 与夜间） |
+| 关联 change | `backlog: harness-p0`（指标定义与 manifest，**未立项**）；`openspec/changes/archive/2026-11-27-harness-p1/`（change-1：§1 判据缺陷率 / 假阴性率口径、§3 `kind=eval` 14 字段）；`backlog: harness-criteria-prompt`（gate 四元组与夜间，**待立项**） |
 | AC 映射 | change-1（`openspec/changes/archive/2026-11-27-harness-p1/`）的 **AC-13**（`kind=eval` manifest 14 字段 ⇒ 覆盖 §3 字段表与四元组回滚集）· **AC-15/AC-16**（§1 `judge_defect_rate` / `false_negative_rate` / 审计覆盖率的分母与抽样口径）· **AC-14 + pilot-002/003**（§1 恒真检查的 harness case 判别力面 ⇒ 本次澄清是**回填既有事实**，不改判据）。**未覆盖**：§2 分层 gate 的运行侧、§4 统计与预算、§5 假绿监控的阈值告警（需 runner 与夜间） |
-| 本次修订 | 2026-11-27：`kind=eval` manifest 增 `manifest_version`、`path_config_version`、`arms_index_sha256`、`budget_usd`、`cost_usd_actual`（共 14 字段）+ 字段演进规则 + `prompt_version` 多臂并集口径 + 归属修订的四元组回滚集。**指标定义、分母口径、gate 语义一律不变**（指向 ADR-0007 / ADR-0008）；同日（2026-11-27）**恒真检查行新增「两模型」适用口径澄清**（见 §1 该行）—— 澄清的是**适用口径**，未改公式、未改行粒度、未改任何阈值 ⇒ **gate 语义与分母口径不变**；`metrics_version` **不变**（判据口径澄清未落到公式层，恒真检查尚无实现 ⇒ 无实现漂移；若后续实现该指标，再随实现升版） |
+| 本次修订 | 2026-11-27：`kind=eval` manifest 增 `manifest_version`、`path_config_version`、`arms_index_sha256`、`budget_usd`、`cost_usd_actual`（共 14 字段）+ 字段演进规则 + `prompt_version` 多臂并集口径 + 归属修订的四元组回滚集。**指标定义、分母口径、gate 语义一律不变**（指向 ADR-0007 / ADR-0008）；同日（2026-11-27）**恒真检查行新增「两模型」适用口径澄清**（见 §1 该行）—— 澄清的是**适用口径**，未改公式、未改行粒度、未改任何阈值 ⇒ **gate 语义与分母口径不变**；`metrics_version` **不变** —— 本次只补**适用口径与判据注释**（公式列的计算式未改）；判据侧的判别力检查**已实现**（`harness/criteria/oracle.py` 基线缺失即抛错、`harness/tests/test_cases.py` 的 no-op 红检查），但那是**判据**、不是**报告指标** ⇒ 无实现漂移；若后续把「恒真检查」作为**报告指标**实现（数值 / 分母 / 告警阈值），再随实现升版 |
 
 ## 背景与问题
 
@@ -23,7 +23,7 @@ P0 的成功判据是「指标可复算」，因此本 ADR 的第一要务不是
 
 ### 1. 指标定义（P0 即生效）
 
-**行粒度（唯一口径）**
+**行粒度（唯一口径）**（⚠ 2026-11-27 定义边界：本章的「**指标**」= 可报告的数值 / 判定；行内的**适用口径**（哪类用例适用、按族分派、第二腿回指）属**判据注释** —— 其澄清不改公式、不升 `metrics_version`；判据侧的实现（`harness/criteria/**`）不在「指标实现」之列）
 
 - **P0：一行 = 一个根 session**（子会话按 `parent_id` 归并到根）；成功率、时延、成本均按 session 计。
 - **P1 起：一行 = 一个 unit**（定义见 ADR-0002）。切换时报告必须标注 `granularity=session|unit`，且 P0 与 P1 的趋势**不可拼接**。

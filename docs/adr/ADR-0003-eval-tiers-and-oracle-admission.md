@@ -9,7 +9,7 @@
 | Parent | ADR-0001 |
 | 关联 change | `openspec/changes/archive/2026-11-27-harness-p1/`（change-1：cap 首族 case + 100% 判据审计）+ `backlog: harness-criteria-prompt`（任务集与 prompt 契约，**待立项**） |
 | 分期 | **P1**（P0 只做观测指标，不建评测集） |
-| AC 映射 | change-1 的 **AC-14**（cap 首族 case：reference 通过 / 替代正确解通过 / 变红演练 / case 定义不可达）+ **pilot-001/002/003**（100% 审计、`auditor ≠ author`）覆盖决策 3 的七条。**未覆盖**：决策 3 的「每 trial 干净环境」「case 变更后重跑变红」· 决策 8 的四元组 gate · Verification「contract 层在无模型无网络的 CI 中可执行」⇒ 属 `harness-criteria-prompt` 与对照 run change |
+| AC 映射 | change-1 的 **AC-14**（cap 首族 case：reference 通过 / 替代正确解通过 / 变红演练 / case 定义不可达）+ **pilot-001/002/003**（100% 审计、`auditor ≠ author`）覆盖决策 3 的**八条中七条**（第 5 条只覆盖**前半**）：① 隔离 fixture 可重放（AC-14 在 scratch workspace 内运行）· ② 机械 oracle · ③ reference solution 通过 · ④ 替代正确解通过 · ⑤「一次变红演练」（第 5 条的**前半**）· ⑦ case 对 solver 不可达 · ⑧ 审计记录 + `auditor ≠ author`。**未覆盖**：第 5 条后半「case 变更后重跑变红」、第 6 条「每 trial 干净环境」· 决策 8 的四元组 gate · Verification「contract 层在无模型无网络 CI 中可执行」⇒ 属 `harness-criteria-prompt` 与对照 run change |
 
 ## 背景与问题
 
