@@ -1,0 +1,75 @@
+{
+  "id": "cap-003",
+  "title": "任务级失败必须计为失败而不是缺数据",
+  "task_orchestration_intrinsic": false,
+  "source": "O 层 95 次 `edit` 入参非法（docs/research/08-p0-findings-and-writeback.md）",
+  "scope_note": "判据绑定记录格式 ⇒ change-2 的任务 prompt 必须固定「`tools/build.out` 内含 `exit=<码>`」；且 runner **不得**替 agent 写该工件（否则断言退化为「runner 跑过这一步」的恒真）；「写了又删」在终态语义下不可见 ⇒ 需 change-2 的 transcript 层。",
+  "fixture": {
+    "tools/build.sh": "#!/bin/sh\necho 'building'\nexit 3\n"
+  },
+  "oracle": {
+    "kind": "file_facts",
+    "checks": [
+      {
+        "path": "tools/build.out",
+        "content_contains": "exit=3"
+      },
+      {
+        "path": "out/artifact.txt",
+        "absent": true
+      },
+      {
+        "path": ".",
+        "only_paths": [
+          "tools/build.out"
+        ]
+      }
+    ]
+  },
+  "reference_solution": {
+    "note": "步骤失败 ⇒ 把失败**记录**下来（退出码入 tools/build.out）且不产出任何工件",
+    "actions": [
+      {
+        "type": "run",
+        "command": [
+          "sh",
+          "tools/build.sh"
+        ],
+        "record": "tools/build.out"
+      }
+    ]
+  },
+  "alternative_solution": {
+    "note": "同一终态、不同动作路径（显式捕获退出码后自行写入记录）",
+    "actions": [
+      {
+        "type": "run",
+        "command": [
+          "sh",
+          "-c",
+          "sh tools/build.sh; printf 'exit=%s\\n' $? > tools/build.out"
+        ]
+      }
+    ]
+  },
+  "mutations": [
+    {
+      "note": "变红演练：把失败当成成功、产出工件 ⇒ 工件存在 + 越出允许清单 ⇒ 两红",
+      "actions": [
+        {
+          "type": "run",
+          "command": [
+            "sh",
+            "tools/build.sh"
+          ],
+          "record": "tools/build.out"
+        },
+        {
+          "type": "write",
+          "path": "out/artifact.txt",
+          "content": "claimed success\n"
+        }
+      ]
+    }
+  ]
+}

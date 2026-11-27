@@ -1,0 +1,14 @@
+# harness/eval/prompts/markers.yaml — 角色矩阵关键段标记清单
+#
+# 格式：受限 YAML 子集（harness/eval/mini_yaml.py）；引号内是字面量。
+# 断言对象 = W0 副本文件自身的内容（文件事实），不是模型输出。
+#
+# ⚠ 治理面的标记格式变更时，本清单必须同步并升 version —— 否则断言静默失效
+#   （旧标记查不到 = 看起来「通过」，实际已失去检测力）。
+#
+# version: 2026-11-27-1
+- version: "2026-11-27-1"
+- marker: "【角色:"
+- marker: "For agentic workers"
+- marker: "<!-- capability:"
+- marker: "<!-- role-class-write-set:"

@@ -1,0 +1,24 @@
+# harness/safety-core.manifest — 安全核路径清单（ADR-0004 决策 4）
+#
+# 格式：每行 = <scope>:<glob> <理由>；'#' 开头为注释。
+#   scope=repo      —— 本仓资产：glob 必须匹配到 ≥1 个真实文件（由 harness/eval/safety_core.py 核对）
+#   scope=external  —— 跨仓载体：只登记不校验（校验由跨仓 gate 负责）
+#
+# ⚠ 清单落地时必须核对 glob 与实际布局：已发现的真实缺陷是 ADR-0004 原文写
+#   `harness/metrics/**`，而指标定义是单文件 `harness/metrics.py` ⇒ 该 glob 匹配不到。
+#   本清单按实际布局写 `repo:harness/metrics.py`。
+#
+# 版本：2026-11-27-1
+repo:harness/path-config.yaml       期望归属声明（判据资产，ADR-0007 决策 4）
+repo:harness/eval/**                评测定义与 rubric（判据资产，ADR-0006）
+repo:harness/criteria/**            oracle 定义（判据资产，ADR-0003）
+repo:harness/metrics.py             指标定义与行粒度（单文件，ADR-0005）
+repo:harness/safety-core.manifest   安全核清单自身
+repo:harness/safety-core.sha256     安全核清单哈希
+repo:tests/**                       既有 bats 用例（判据不可达边界）
+repo:docs/adr/**                    ADR（判据的判据，ADR-0004）
+repo:docs/runtime-assertion-discipline.md  断言纪律唯一真源
+external:~/.config/opencode/prompts/**    治理面角色矩阵（跨仓，opencode 仓）
+external:~/.config/opencode/lib/**        治理面实现机械（跨仓，opencode 仓）
+external:rdd-workflow/skills/**           叠加层 skill 文档与 owns 声明（跨仓，rdd-workflow 仓）
+external:rdd-workflow/**/_lib/**          叠加层运行时 gate / handoff 机械（跨仓，rdd-workflow 仓）

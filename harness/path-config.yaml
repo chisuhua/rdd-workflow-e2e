@@ -1,0 +1,34 @@
+# harness/path-config.yaml — 期望归属声明（ADR-0007 决策 4）
+#
+# 格式：受限 YAML 子集（解析器 = harness/eval/mini_yaml.py）；解析失败即报错，不猜。
+# 阶段集合的权威来源：harness/eval/path_config.py::EXPECTED_STAGES
+#   （= rdd-workflow 的四个阶段执行型职责：arch / plan / build / verify）
+#
+# 五列语义：
+#   阶段       —— 阶段执行型职责（产出 openspec 工件 / handoff 的阶段）
+#   当前承担者 —— 基座 | 叠加层
+#   证据强度   —— 方向性 | 判据层 | 完整A/B（ADR-0007 决策 3 的三档）
+#   移动门槛   —— 该阶段允许迁移归属所需的证据档
+#   证据集     —— 支撑该阶段判据的 case id 列表（可解析到任务集内的 case）
+#
+# ⚠ 「证据强度」与「证据集」为空的行数必须 = 0（脚本 lint）。
+- 阶段: arch
+  当前承担者: 叠加层
+  证据强度: 方向性
+  移动门槛: 判据层
+  证据集: cs-rdd-1
+- 阶段: plan
+  当前承担者: 叠加层
+  证据强度: 方向性
+  移动门槛: 判据层
+  证据集: cs-rdd-2
+- 阶段: build
+  当前承担者: 叠加层
+  证据强度: 方向性
+  移动门槛: 判据层
+  证据集: cs-e3, cs-e4
+- 阶段: verify
+  当前承担者: 叠加层
+  证据强度: 方向性
+  移动门槛: 判据层
+  证据集: cs-e1

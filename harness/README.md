@@ -60,3 +60,64 @@ runs/<UTC-stamp>/
 
 - ADR-0001（数据面与归属）、ADR-0002（trace 合同，P1）、ADR-0005（指标口径）
 - 架构：`docs/architecture/agent-harness-and-rsi.md` §4
+
+---
+
+# E 层就绪资产（change-1，双路径对照开工的前置）
+
+本节是 **P1 的第一批交付物**（`openspec/changes/harness-p1`）。它们让双路径对照
+（W0 / W1 / W2 三臂，ADR-0008）**可开工、可审计** —— 但**本期不跑真模型**：
+只交付静态资产、判据与单元测试；runner 与真模型 run 另立。
+
+## 用法
+
+```bash
+# 归属声明 lint（阶段集合对账 + 五列非空 + 证据集可解析）+ 迁空 tripwire
+python3 -m harness.eval.cli path-config
+
+# 遮蔽探针（环境状态 JSON；断言方向按臂条件化）
+python3 -m harness.eval.cli masking --env /tmp/env.json --arm W0
+
+# 臂索引追加（五字段；臂标签只存在于此）
+python3 -m harness.eval.cli arms-index --path ~/.local/share/rddf-harness/arms/index.jsonl \
+  --session-id ses_x --run-id run_x --arm W2 --prompt-hash <sha256>
+
+# 产出 kind=eval manifest（14 字段）
+python3 -m harness.eval.cli eval-manifest --out /tmp/run-manifest.json \
+  --opencode-sha <sha> --product-sha <sha> --model-id <id> \
+  --prompt-version <hash> --criteria-version <hash> --taskset-version <hash> \
+  --snapshot-sha <sha>
+
+# 判据审计汇总（三个率 + 冻结判定）
+python3 -m harness.eval.cli audit --findings /tmp/findings.json \
+  --audited-total 10 --sampling-method "试点 10 条全审"
+
+# 单元测试（无外部依赖）
+python3 -m unittest discover -s harness/tests -t .
+```
+
+**判红 ⇒ 退出码 1**；用法错 ⇒ 退出码 2。
+
+## 资产清单与判据出处
+
+| 资产 | 作用 | 判据出处 |
+|---|---|---|
+| `harness/path-config.yaml` | 期望归属声明（五列 + 证据集） | ADR-0007 决策 4 |
+| `harness/eval/path_config.py` | 声明 lint、阶段集合对账、迁空 tripwire、`path_config_version` | ADR-0007 Verification |
+| `harness/safety-core.manifest` + `.sha256` | 安全核路径清单（`repo:` / `external:` 两类 scope） | ADR-0004 决策 4 |
+| `harness/eval/safety_core.py` | glob ↔ 实际布局核对（清单与布局不符 ⇒ 判红） | ADR-0004 决策 4（含 `harness/metrics/**` 匹配不到单文件的教训） |
+| `harness/eval/masking.py` | 遮蔽探针（四项断言 + 按臂条件化） | ADR-0008 决策 6 |
+| `harness/eval/prompts/w0-base.md` + `markers.yaml` | W0 通用 prompt 副本 + 角色矩阵关键段清单（版本化） | ADR-0008 决策 1 |
+| `harness/eval/arms_index.py` | 臂索引 writer（五字段；标签只在此） | ADR-0008 决策 2；ADR-0001 决策 4 |
+| `harness/manifest.py::build_eval` | `kind=eval` manifest（14 字段） | ADR-0005 §3 |
+| `harness/criteria/cases/*.json` + `harness/criteria/oracle.py` | cap 集首族 case（机械 oracle + reference / alternative / mutation） | ADR-0003 决策 3；主题文档 §6 |
+| `harness/eval/audit.py` | 判据审计三率 + 冻结扩量判定 | ADR-0005 指标定义；ADR-0003 决策 4 |
+
+## 本期的硬门与不做项
+
+- **硬门**：ADR-0006 §5 判定 memo 未落盘 ⇒ 双路径对照**不得开工**
+  （memo：`.rddf/reviews/adr-0006-isolation-verdict.md`）。
+- **不做**：runner、真模型调用、臂间 Δ、容器档、生产侧归因、delegate 跨仓持久化。
+- **判据资产**：`harness/path-config.yaml`、`harness/safety-core.manifest`、
+  `harness/eval/**`、`harness/criteria/**` 均在安全核内 ⇒ 落地强制人审 + 安全核扫描
+  （ADR-0004 决策 2）。
