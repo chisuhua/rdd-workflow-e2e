@@ -153,6 +153,25 @@
 这两个纪律文件用 `git log -1 -- <file>` 判断该文件是否在「生效日」之后被改动过；**浅克隆**会让这个查询退化成「HEAD 的日期」⇒ 历史存量被误当成「新」⇒ 把 opencode 仓**刻意豁免**的旧账翻出来。
 实测（2026-11-26）：`--depth 1` ⇒ 9 条红；完整克隆 ⇒ 0 条红。
 
+## 2026-11-27 新发现：第 10 条 —— 归属 **rdd-workflow 仓**（与前 9 条归属仓不同）
+
+> ⚠ **归属仓不同**：前 9 条缺口归 **opencode 仓**（`~/.config/opencode`）；本条归 **rdd-workflow 仓**
+> （`~/.agents/skills/rdd-workflow`，源码 `chisuhua/rdd-workflow`）。同样按「**只记录，不改该仓**」处置。
+
+### 10. `skip_specs: true` 的 change 归档时，归档产物未被提交（`git add` 整体失败）
+
+| 项 | 内容 |
+|---|---|
+| **归属仓** | rdd-workflow 仓（`_lib/archive.sh::commit_archive_moves`，约 :1314-1320） |
+| **当前判定** | **实测复现**（2026-11-27，harness-p1 归档时命中） |
+| **现象** | 归档步骤的 `git add` 带三个 pathspec：`openspec/changes/<name>/`、`openspec/changes/archive/`、`openspec/specs/`。当 change 声明 `skip_specs: true`（或任何**不产生主 spec**的形态）时，`openspec/specs/` **不存在** ⇒ `git add` 因「pathspec 不存在」**整体失败** ⇒ 脚本走 `git reset HEAD` 回滚 ⇒ **归档产物（`openspec/changes/archive/<date>-<name>/`）留在工作树里未跟踪**，而归档前的 active change 目录删除已在分支上提交 ⇒ 仓里出现「旧目录已删、新目录未入库」的半归档态 |
+| **复现命令** | 在一个声明 `skip_specs: true` 的 change 上走完 P3 归档 ⇒ `git status --porcelain` 显示 `?? openspec/changes/archive/…`；同时 `git ls-files openspec` 为空（说明归档产物根本没进索引） |
+| **原始证据** | 本仓 harness-p1 归档的输出：`❌ commit_archive_moves: git add failed`（**非致命** —— 归档流程整体 rc=0，脚本只打印告警）⇒ 缺陷的隐蔽性来自「非致命」：流程报成功，产物却没入库 |
+| **影响** | ① 归档产物不在版本控制里 ⇒ 归档态不可复现、不可回滚；② 流程**报成功** ⇒ 上层（rdd-workflow 的 status / 归档视图）会把「已归档」与「产物已入库」混为一谈；③ 本仓已用**独立提交**补上归档产物（`eca49fb`），并在提交信息里写明根因 |
+| **建议修法（rdd-workflow 侧）** | `git add` 的 pathspec 列表**逐个存在性检查后再 add**（或改用 `git add -A -- <存在的目录>`），避免单个不存在的 pathspec 让整条 add 失败；并把「归档产物未入库」从**非致命告警**升为**可判定的失败**（否则归档成功与产物入库被混为一谈） |
+| **本仓是否间接覆盖** | **否**。本仓 L3 套件（`tests/integration/**`）**不覆盖 P3 归档路径**（它验的是 rdd-workflow 的安装与阶段合同）；本条由 harness-p1 的真实归档流程命中，属**首次实测发现** |
+| **备注** | 本条同时暴露一个**通用形态**：凡「多 pathspec 的 `git add`」在不满足其中之一时都会整体失败 ⇒ 同类实现应避免把不存在的路径放进同一条 add |
+
 ## 不是 opencode 仓缺口、但本轮实测踩到并已在本仓消化的 4 个坑
 
 这 4 条**归属本仓的 L2 harness**（探针脚本 + 测试骨架），不进上面的跨仓表；
