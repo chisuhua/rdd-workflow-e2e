@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-11-28
+goal: 判据契约链 —— case 的结构化 contract（单一真源）+ 由它渲染的任务 prompt + oracle check 稳定 id + tier 标注 + 双哈希（criteria/taskset 分开）+ 重跑 gate（基线 + 重跑记录）+ 红集归因（expect_red / 覆盖率）+ 审计记录 oracle_sha；不跑真模型
+affected_areas:
+  - harness/criteria
+  - harness/eval
+skip_specs: true
